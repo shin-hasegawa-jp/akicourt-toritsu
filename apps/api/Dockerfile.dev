@@ -1,0 +1,5 @@
+FROM node:24.18.0-alpine
+WORKDIR /app
+RUN mkdir -p /app/node_modules /app/dist && chown -R node:node /app
+USER node
+CMD ["sh", "-c", "npm ci --no-audit --no-fund && npm run dev"]

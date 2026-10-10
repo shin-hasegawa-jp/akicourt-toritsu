@@ -1,47 +1,64 @@
 <script setup lang="ts">
-import HelloWorld from './components/HelloWorld.vue'
-import TheWelcome from './components/TheWelcome.vue'
+import { ref } from 'vue'
+
+const status = ref('未確認')
+const checking = ref(false)
+const note = ref('')
+
+async function checkConnection() {
+  if (checking.value) return
+  checking.value = true
+  status.value = '確認中'
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), 5000)
+  try {
+    const response = await fetch('/api/health', { signal: controller.signal })
+    if (!response.ok) throw new Error('HTTP error')
+    const body: unknown = await response.json()
+    if (!body || typeof body !== 'object' || !('status' in body) || body.status !== 'ok') {
+      throw new Error('Unexpected response')
+    }
+    status.value = '接続成功'
+  } catch {
+    status.value = '接続できません。APIの起動を確認して再試行してください。'
+  } finally {
+    window.clearTimeout(timeout)
+    checking.value = false
+  }
+}
 </script>
 
 <template>
-  <header>
-    <img alt="Vue logo" class="logo" src="./assets/logo.svg" width="125" height="125" />
-
-    <div class="wrapper">
-      <HelloWorld msg="You did it!" />
-    </div>
-  </header>
-
   <main>
-    <TheWelcome />
+    <h1>AkiCourt Toritsu</h1>
+    <p>開発環境の接続確認</p>
+    <button :disabled="checking" @click="checkConnection">API接続を確認</button>
+    <p role="status">{{ status }}</p>
+    <label for="note">メモ（通信中も入力できます）</label>
+    <input id="note" v-model="note" type="text" />
   </main>
 </template>
 
 <style scoped>
-header {
-  line-height: 1.5;
+main {
+  max-width: 40rem;
 }
-
-.logo {
+h1 {
+  margin-bottom: 1rem;
+}
+button,
+input {
+  font: inherit;
+  padding: 0.6rem;
+}
+p {
+  margin: 1rem 0;
+}
+label {
   display: block;
-  margin: 0 auto 2rem;
+  margin-bottom: 0.4rem;
 }
-
-@media (min-width: 1024px) {
-  header {
-    display: flex;
-    place-items: center;
-    padding-right: calc(var(--section-gap) / 2);
-  }
-
-  .logo {
-    margin: 0 2rem 0 0;
-  }
-
-  header .wrapper {
-    display: flex;
-    place-items: flex-start;
-    flex-wrap: wrap;
-  }
+input {
+  width: 100%;
 }
 </style>

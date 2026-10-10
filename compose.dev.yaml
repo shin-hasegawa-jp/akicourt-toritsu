@@ -1,0 +1,50 @@
+name: ${COMPOSE_PROJECT_NAME:-akicourt-toritsu}
+
+services:
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile.dev
+    environment:
+      API_HOST: 0.0.0.0
+      PORT: 3000
+    ports:
+      - "127.0.0.1:${API_PORT:-17591}:3000"
+    volumes:
+      - ./apps/api:/app
+      - api-node-modules:/app/node_modules
+      - api-dist:/app/dist
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 120s
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile.dev
+    environment:
+      WEB_HOST: 0.0.0.0
+      WEB_PORT: 5173
+      API_PROXY_TARGET: http://api:3000
+    ports:
+      - "127.0.0.1:${WEB_PORT:-17590}:5173"
+    volumes:
+      - ./apps/web:/app
+      - web-node-modules:/app/node_modules
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5173/').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 120s
+
+volumes:
+  api-node-modules:
+  api-dist:
+  web-node-modules:
