@@ -73,7 +73,7 @@ npm test
 curl -sS http://127.0.0.1:17590/api/availability/search -H 'Content-Type: application/json' -d '{"targets":[{"parkId":"1280","surface":"grass"}]}'
 ```
 
-日付省略時は日本時間の本日から7日間。検索は保存済み情報のみを返す。`POST /api/availability/updates`へ同じ対象・期間を送り、返された`jobId`を`GET /api/availability/updates/:jobId`で確認する。更新には稼働中のワーカーが必要（停止中は503）。祝日条件に必要な年の登録が未完了なら503を返す。祝日実データは未登録。
+日付省略時は日本時間の本日から7日間。検索は保存済み情報のみを返す。`POST /api/availability/updates`へ同じ対象・期間を送り、返された`jobId`を`GET /api/availability/updates/:jobId`で確認する。更新には稼働中のワーカーが必要（停止中は503）。祝日条件に必要な年の登録が未完了なら503を返す。[祝日データの登録・更新手順](docs/祝日データ.md)を参照（2026・2027年を同梱）。
 
 公式への取得は更新APIまたは`storage enqueue`で登録し、ワーカーで実行する。DBの重複・停止制御を通らない旧検証CLIは削除済み。取得処理の検証は自動テストを利用する。
 

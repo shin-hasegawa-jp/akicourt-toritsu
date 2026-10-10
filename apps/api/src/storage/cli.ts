@@ -2,18 +2,25 @@ import { database, migrate } from './database'
 import { Store } from './store'
 import { japanToday, scopes } from './scopes'
 import { work } from './worker'
+import { registerHolidays } from './holidays'
 
 async function main(): Promise<void> {
   const [command, ...args] = process.argv.slice(2)
-  if (!['migrate', 'enqueue', 'worker', 'reset-block'].includes(command || ''))
+  if (!['migrate', 'holidays', 'enqueue', 'worker', 'reset-block'].includes(command || ''))
     throw new Error(
-      'Usage: storage migrate | enqueue PARK:grass|hard [PARK:grass|hard] [--from YYYY-MM-DD --to YYYY-MM-DD] | worker [--once] | reset-block',
+      'Usage: storage migrate | holidays YEAR [YEAR] | enqueue PARK:grass|hard [PARK:grass|hard] [--from YYYY-MM-DD --to YYYY-MM-DD] | worker [--once] | reset-block',
     )
   const pool = database()
   // Do not print pg errors containing connection details.
   pool.on('error', () => console.error('database-unavailable'))
   const store = new Store(pool)
   try {
+    if (command === 'holidays') {
+      if (!args.length || args.some((arg) => !/^\d{4}$/.test(arg)))
+        throw new Error('invalid-arguments')
+      await registerHolidays(pool, args.map(Number))
+      console.log(`Holiday calendars registered: ${args.join(', ')}`)
+    }
     if (command === 'migrate') {
       await migrate(pool)
       console.log('Migrations applied')
