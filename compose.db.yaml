@@ -1,0 +1,26 @@
+# Optional local database layer. Use together with compose.dev.yaml.
+services:
+  db:
+    image: postgres:18.6-alpine3.23
+    environment:
+      POSTGRES_USER: akicourt
+      POSTGRES_DB: akicourt
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - db-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U akicourt -d akicourt"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+
+  api:
+    environment:
+      DATABASE_URL: postgresql://akicourt:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/akicourt
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  db-data:
