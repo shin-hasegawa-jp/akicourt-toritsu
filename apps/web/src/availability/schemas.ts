@@ -75,7 +75,6 @@ export const UpdatesSchema = v.object({
   pollAfterSeconds: v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(60)),
 })
 export const ErrorSchema = v.object({ error: v.object({ code: v.string(), message: v.string() }) })
-export const HealthSchema = v.object({ status: v.literal('ok') })
 
 const targetMessage = '公園・種目を1〜2件選んでください。'
 const dateMessage = '開始日と終了日を含め、最大7日間の期間を指定してください。'
