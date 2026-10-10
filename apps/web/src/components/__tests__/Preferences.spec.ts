@@ -11,7 +11,7 @@ afterEach(() => {
   vi.useRealTimers()
 })
 describe('saved conditions and official handoff', () => {
-  it('restores selected filters, resets past dates, and never starts acquisition on restore', () => {
+  it('restores selected filters, always resets dates, and never starts acquisition on restore', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-10-10T00:00:00Z'))
     saveConditions(localStorage, { ...defaults(), weekdays: [0, 6], minDurationMinutes: 120 })
@@ -21,14 +21,14 @@ describe('saved conditions and official handoff', () => {
     expect((wrapper.get('#duration').element as HTMLSelectElement).value).toBe('120')
     expect((wrapper.get('#date-from').element as HTMLInputElement).value).toBe('2026-10-11')
     expect((wrapper.get('#date-to').element as HTMLInputElement).value).toBe('2026-10-17')
-    expect(wrapper.text()).toContain('過去の期間')
+    expect(wrapper.text()).toContain('期間は本日から7日間')
     expect(fetch).not.toHaveBeenCalled()
     wrapper.unmount()
   })
   it('falls back for corrupt, incompatible or inaccessible saved data; rejects invalid saves', () => {
     for (const raw of [
       '{',
-      JSON.stringify({ version: 2, conditions: defaults() }),
+      JSON.stringify({ version: 3, conditions: defaults() }),
       JSON.stringify({ version: 1, conditions: { ...defaults(), targets: ['unknown'] } }),
     ]) {
       expect(restoreConditions({ getItem: () => raw }).conditions).toEqual(defaults())
@@ -54,24 +54,34 @@ describe('saved conditions and official handoff', () => {
       ),
     ).toContain('保存できません')
   })
-  it('saves only when explicitly requested and restores the saved version on remount', async () => {
+  it('automatically saves filters without dates and restores them on remount', async () => {
     const wrapper = mount(App)
     await wrapper.get('#duration').setValue('120')
-    expect(localStorage.length).toBe(0)
-    await wrapper
-      .findAll('button')
-      .find((button) => button.text() === 'このブラウザに条件を保存')!
-      .trigger('click')
+    const saved = JSON.parse(localStorage.getItem('akicourt.conditions.v1')!)
+    expect(saved.conditions.minDurationMinutes).toBe(120)
+    expect(saved.conditions).not.toHaveProperty('dateFrom')
+    expect(saved.conditions).not.toHaveProperty('dateTo')
+    await wrapper.get('#date-from').setValue('2026-11-01')
+    await wrapper.get('#date-to').setValue('2026-11-07')
+    expect(JSON.parse(localStorage.getItem('akicourt.conditions.v1')!)).toEqual(saved)
     wrapper.unmount()
     const restored = mount(App)
     expect((restored.get('#duration').element as HTMLSelectElement).value).toBe('120')
-    await restored
-      .findAll('button')
-      .find((button) => button.text() === '保存条件を削除')!
-      .trigger('click')
-    expect(localStorage.length).toBe(0)
-    expect((restored.get('#duration').element as HTMLSelectElement).value).toBe('120')
+    expect((restored.get('#date-from').element as HTMLInputElement).value).toBe(defaults().dateFrom)
+    expect((restored.get('#date-to').element as HTMLInputElement).value).toBe(defaults().dateTo)
     restored.unmount()
+  })
+  it('ignores future dates saved by the previous version while retaining filters', () => {
+    const conditions = {
+      ...defaults(),
+      dateFrom: '2099-01-01',
+      dateTo: '2099-01-07',
+      minDurationMinutes: 120,
+    }
+    const restored = restoreConditions({
+      getItem: () => JSON.stringify({ version: 1, conditions }),
+    })
+    expect(restored.conditions).toEqual({ ...defaults(), minDurationMinutes: 120 })
   })
   it('offers manual copy when clipboard is unavailable and opens only the official home', async () => {
     const wrapper = mount(App)

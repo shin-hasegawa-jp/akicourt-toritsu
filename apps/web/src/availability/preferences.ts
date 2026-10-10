@@ -1,20 +1,13 @@
 import * as v from 'valibot'
-import { ConditionsSchema, type Conditions, type Slot } from './schemas'
-import { defaults, parks, today, weekdayNames } from './model'
+import { ConditionFieldsSchema, ConditionsSchema, type Conditions, type Slot } from './schemas'
+import { defaults, parks, weekdayNames } from './model'
 
 const key = 'akicourt.conditions.v1'
-export function removeConditions(storage: Pick<Storage, 'removeItem'>): string {
-  try {
-    storage.removeItem(key)
-    return '保存条件を削除しました。次回は初期条件で開きます。'
-  } catch {
-    return '保存条件を削除できません。ブラウザの保存設定を確認してください。'
-  }
-}
 const SavedSchema = v.object({
-  version: v.literal(1),
+  version: v.union([v.literal(1), v.literal(2)]),
   conditions: v.pipe(
-    ConditionsSchema,
+    v.omit(ConditionFieldsSchema, ['dateFrom', 'dateTo']),
+    v.check((input) => v.safeParse(ConditionsSchema, { ...defaults(), ...input }).success),
     v.check(
       (input) =>
         [0, 60, 120, 180].includes(input.minDurationMinutes) &&
@@ -37,16 +30,10 @@ export function restoreConditions(storage: Pick<Storage, 'getItem'>): {
         conditions: fallback,
         message: '保存条件を読み込めないため、初期条件を表示しています。',
       }
-    const conditions = saved.output.conditions
-    if (conditions.dateFrom < today()) {
-      conditions.dateFrom = fallback.dateFrom
-      conditions.dateTo = fallback.dateTo
-      return {
-        conditions,
-        message: '保存条件を復元しました。過去の期間は本日から7日間に戻しました。',
-      }
+    return {
+      conditions: { ...fallback, ...saved.output.conditions },
+      message: 'このブラウザに保存した条件を復元しました。期間は本日から7日間です。',
     }
-    return { conditions, message: 'このブラウザに保存した条件を復元しました。' }
   } catch {
     return {
       conditions: fallback,
@@ -55,11 +42,11 @@ export function restoreConditions(storage: Pick<Storage, 'getItem'>): {
   }
 }
 export function saveConditions(storage: Pick<Storage, 'setItem'>, conditions: Conditions): string {
-  const parsed = v.safeParse(ConditionsSchema, conditions)
+  const parsed = v.safeParse(SavedSchema, { version: 2, conditions })
   if (!parsed.success) return parsed.issues[0].message
   try {
-    storage.setItem(key, JSON.stringify({ version: 1, conditions: parsed.output }))
-    return 'このブラウザに条件を保存しました。'
+    storage.setItem(key, JSON.stringify(parsed.output))
+    return ''
   } catch {
     return '条件を保存できません。ブラウザの保存設定を確認してください。'
   }

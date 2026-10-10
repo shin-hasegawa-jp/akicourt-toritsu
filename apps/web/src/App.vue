@@ -1,11 +1,10 @@
 <script setup lang="ts">
-import { nextTick, reactive, ref } from 'vue'
+import { nextTick, reactive, ref, watch } from 'vue'
 import ConnectionCheck from './components/ConnectionCheck.vue'
 import { defaults, parks, weekdayNames } from './availability/model'
 import {
   conditionsText,
   restoreConditions,
-  removeConditions,
   saveConditions,
   slotText,
 } from './availability/preferences'
@@ -29,13 +28,18 @@ function save() {
     preferenceMessage.value = '条件を保存できません。ブラウザの保存設定を確認してください。'
   }
 }
-function removeSaved() {
-  try {
-    preferenceMessage.value = removeConditions(localStorage)
-  } catch {
-    preferenceMessage.value = '保存条件を削除できません。ブラウザの保存設定を確認してください。'
-  }
-}
+watch(
+  () => [
+    form.targets,
+    form.weekdays,
+    form.includeHolidays,
+    form.timeFrom,
+    form.timeTo,
+    form.minDurationMinutes,
+  ],
+  save,
+  { deep: true },
+)
 async function copy(text: string) {
   try {
     await navigator.clipboard.writeText(text)
@@ -112,8 +116,7 @@ function parkName(id: string): string {
       <section class="panel conditions" aria-labelledby="conditions-title">
         <h2 id="conditions-title">検索条件</h2>
         <p class="subtle">最大2対象・7日間。条件は検索後も編集できます。</p>
-        <button type="button" @click="save">このブラウザに条件を保存</button>
-        <button type="button" @click="removeSaved">保存条件を削除</button>
+        <p class="hint">期間以外の条件は、このブラウザに自動保存されます。</p>
         <p v-if="preferenceMessage" class="hint" role="status">{{ preferenceMessage }}</p>
         <form novalidate @submit.prevent="search">
           <fieldset>
