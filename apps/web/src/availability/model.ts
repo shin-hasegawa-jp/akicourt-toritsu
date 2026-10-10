@@ -74,7 +74,6 @@ export function validate(input: Conditions): string | null {
   if (input.timeFrom >= input.timeTo) return '終了時刻は開始時刻より後にしてください。'
   return null
 }
-export type Scenario = 'success' | 'empty' | 'none' | 'partial' | 'failed' | 'queued'
 export type Scope = {
   parkId: string
   surface: 'grass' | 'hard'
@@ -109,109 +108,4 @@ export type SearchResult = {
   scopes: Scope[]
   slots: Slot[]
   officialUrl: string
-}
-export function minute(time: string): number {
-  const [h, m] = time.split(':').map(Number)
-  return h! * 60 + m!
-}
-// Synthetic data only. No fetch, storage read or official availability is involved.
-export function preview(input: Conditions, scenario: Scenario): SearchResult {
-  const generatedAt = new Date().toISOString()
-  const observedAt = new Date(Date.now() - (scenario === 'failed' ? 3600000 : 120000)).toISOString()
-  const monday = (date: string) =>
-    offset(date, -((new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7))
-  const weeks = [...new Set([monday(input.dateFrom), monday(input.dateTo)])]
-  const selected = parks.filter((p) => input.targets.includes(p.key))
-  const scopes: Scope[] = selected.flatMap((park) =>
-    weeks.map((weekStart) => ({
-      parkId: park.parkId,
-      surface: park.surface,
-      weekStart,
-      dataState: 'fresh',
-      snapshotId: `demo-${park.key}-${weekStart}`,
-      lastSuccessAt: observedAt,
-      latestAttempt: {
-        jobId: `demo-job-${park.key}-${weekStart}`,
-        state: 'succeeded',
-        errorCode: null,
-      },
-    })),
-  )
-  scopes.forEach((scope, index) => {
-    if (
-      scenario === 'none' ||
-      scenario === 'queued' ||
-      (scenario === 'partial' && index === scopes.length - 1)
-    ) {
-      scope.snapshotId = null
-      scope.lastSuccessAt = null
-      scope.dataState = 'unavailable'
-      scope.latestAttempt =
-        scenario === 'queued'
-          ? { jobId: 'demo-queued', state: 'running', errorCode: null }
-          : scenario === 'partial'
-            ? { jobId: 'demo-failed', state: 'failed', errorCode: 'timeout' }
-            : null
-    } else if (scenario === 'failed') {
-      scope.dataState = 'stale'
-      scope.latestAttempt = { jobId: 'demo-failed', state: 'failed', errorCode: 'timeout' }
-    }
-  })
-  const slots: Slot[] = []
-  if (scenario !== 'empty')
-    for (const park of selected)
-      for (let i = 0; i < 7; i++) {
-        const date = offset(input.dateFrom, i)
-        if (date > input.dateTo) break
-        const weekday = new Date(`${date}T00:00:00Z`).getUTCDay()
-        // Day +2 is an imaginary holiday, solely for checking the filter in this preview.
-        if (!input.weekdays.includes(weekday) && !(input.includeHolidays && i === 2)) continue
-        const scope = scopes.find(
-          (s) =>
-            s.parkId === park.parkId && s.surface === park.surface && s.weekStart === monday(date),
-        )!
-        if (!scope.snapshotId) continue
-        for (const [start, end, count] of [
-          ['09:00', '11:00', 2],
-          ['13:00', '14:00', 1],
-          ['14:00', '15:00', 1],
-        ] as const) {
-          if (
-            minute(start) < minute(input.timeFrom) ||
-            minute(end) > minute(input.timeTo) ||
-            minute(end) - minute(start) < input.minDurationMinutes
-          )
-            continue
-          slots.push({
-            parkId: park.parkId,
-            parkName: park.parkName,
-            surface: park.surface,
-            facilityId: `demo-${park.parkId}`,
-            facilityName: `テニス（${park.label}）`,
-            date,
-            start,
-            end,
-            availableCourts: count,
-            snapshotId: scope.snapshotId,
-            observedAt,
-          })
-        }
-      }
-  slots.sort(
-    (a, b) =>
-      a.date.localeCompare(b.date) ||
-      a.start.localeCompare(b.start) ||
-      a.parkId.localeCompare(b.parkId) ||
-      a.facilityId.localeCompare(b.facilityId),
-  )
-  const count = scopes.filter((s) => s.snapshotId).length
-  return {
-    generatedAt,
-    dateFrom: input.dateFrom,
-    dateTo: input.dateTo,
-    coverage: count === scopes.length ? 'complete' : count ? 'partial' : 'none',
-    scopes,
-    slots,
-    officialUrl: 'https://kouen.sports.metro.tokyo.lg.jp/web/',
-  }
 }

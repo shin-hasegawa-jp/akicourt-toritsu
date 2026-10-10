@@ -335,3 +335,11 @@ summary {
     width: 100%;
   }
 }
+
+.update-controls {
+  margin: 16px 0;
+}
+.primary:disabled {
+  opacity: 0.55;
+  cursor: default;
+}

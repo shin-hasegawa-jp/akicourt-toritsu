@@ -1,24 +1,26 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref } from 'vue'
+import { nextTick, reactive, ref } from 'vue'
 import ConnectionCheck from './components/ConnectionCheck.vue'
-import {
-  defaults,
-  parks,
-  preview,
-  validate,
-  weekdayNames,
-  type Scenario,
-  type SearchResult,
-} from './availability/model'
+import { defaults, parks, weekdayNames } from './availability/model'
+import { useAvailability } from './availability/useAvailability'
 
 const form = reactive(defaults())
-const scenario = ref<Scenario>('success')
-const result = ref<SearchResult | null>(null)
-const applied = ref('')
-const error = ref('')
+const {
+  result,
+  error,
+  notice,
+  loading,
+  updating,
+  jobs,
+  pollFailed,
+  changed,
+  canUpdate,
+  search: runSearch,
+  update,
+  retryPoll,
+} = useAvailability(form)
 const errorElement = ref<HTMLElement | null>(null)
 const resultHeading = ref<HTMLElement | null>(null)
-const changed = computed(() => result.value !== null && applied.value !== JSON.stringify(form))
 const times = Array.from(
   { length: 49 },
   (_, i) =>
@@ -26,25 +28,11 @@ const times = Array.from(
       .toString()
       .padStart(2, '0')}:${i % 2 ? '30' : '00'}`,
 )
-const scenarios: [Scenario, string][] = [
-  ['success', '取得成功'],
-  ['empty', '一致する枠なし'],
-  ['none', '未取得'],
-  ['partial', '一部失敗'],
-  ['failed', '古い結果・最新取得失敗'],
-  ['queued', '取得待ち'],
-]
 async function search() {
-  error.value = validate(form) ?? ''
-  if (error.value) {
-    await nextTick()
-    errorElement.value?.focus()
-    return
-  }
-  result.value = preview(form, scenario.value)
-  applied.value = JSON.stringify(form)
+  if (!(await runSearch())) return
   await nextTick()
-  resultHeading.value?.focus()
+  if (error.value) errorElement.value?.focus()
+  else if (!loading.value && !changed.value) resultHeading.value?.focus()
 }
 function preset(kind: 'all' | 'weekend' | 'holiday') {
   form.weekdays = kind === 'all' ? [0, 1, 2, 3, 4, 5, 6] : kind === 'weekend' ? [0, 6] : []
@@ -74,20 +62,11 @@ function parkName(id: string): string {
         <h1>AkiCourt <span>Toritsu</span></h1>
         <p>都立公園のテニスコートを、希望の条件で探す。</p>
       </div>
-      <span class="preview-badge">画面レビュー用モック</span>
+      <span class="preview-badge">保存済み情報の検索</span>
     </header>
     <aside class="notice">
-      <strong>ここに表示する空き情報はすべて架空です。</strong
-      >検索結果は実API・公式サイトへ接続せず生成しています。祝日も確認用の仮データで、開始日＋2日を祝日として扱います。
+      検索は保存済みの情報を表示します。「空き情報を更新」で取得を依頼できます。取得待ちの間も条件を編集できます。
     </aside>
-    <section class="preview-controls" aria-labelledby="preview-title">
-      <h2 id="preview-title">表示状態の確認</h2>
-      <label for="scenario">モックの状態</label
-      ><select id="scenario" v-model="scenario">
-        <option v-for="[value, label] in scenarios" :key="value" :value="value">{{ label }}</option>
-      </select>
-      <p>状態を選び、「モックで検索」で表示します。</p>
-    </section>
     <div class="workspace">
       <section class="panel conditions" aria-labelledby="conditions-title">
         <h2 id="conditions-title">検索条件</h2>
@@ -157,7 +136,9 @@ function parkName(id: string): string {
           <p v-if="error" ref="errorElement" class="error" role="alert" tabindex="-1">
             {{ error }}
           </p>
-          <button class="primary" type="submit">モックで検索</button>
+          <button class="primary" type="submit">
+            {{ loading ? '再検索（検索中）' : '保存済み情報を検索' }}
+          </button>
         </form>
       </section>
       <section class="panel results" aria-labelledby="results-title">
@@ -165,8 +146,42 @@ function parkName(id: string): string {
           <h2 id="results-title" ref="resultHeading" tabindex="-1">検索結果</h2>
           <span v-if="result" class="count">{{ result.slots.length }}枠</span>
         </div>
-        <p v-if="!result" class="empty">条件を選び、「モックで検索」を押してください。</p>
-        <template v-else>
+        <p v-if="!result" class="empty">条件を選び、「保存済み情報を検索」を押してください。</p>
+        <p v-if="loading" role="status" class="notice">
+          保存済み情報を検索しています。条件は引き続き編集できます。
+        </p>
+        <p v-if="notice" role="status" class="notice">{{ notice }}</p>
+        <div v-if="result" class="update-controls">
+          <button type="button" class="primary" :disabled="!canUpdate" @click="update">
+            {{ updating ? '取得状況を確認中' : '空き情報を更新' }}
+          </button>
+          <p class="hint">
+            表示中の対象・期間の取得を依頼します。条件を変更した場合は、先に再検索してください。
+          </p>
+        </div>
+        <div v-if="jobs.length" class="coverage" role="status">
+          <p>更新状況（通信件数は完了率ではありません）</p>
+          <ul>
+            <li v-for="job in jobs" :key="job.jobId">
+              {{ parkName(job.parkId) }} · {{ job.weekStart }}からの週 ·
+              {{
+                {
+                  queued: '取得待ち',
+                  running: '取得中',
+                  succeeded: '取得成功',
+                  failed: '取得失敗',
+                }[job.state]
+              }}
+              · 通信{{ job.requestCount }}件<span v-if="job.retryAfter"
+                >再要求まで{{ job.retryAfter }}秒（確認時点）</span
+              >
+            </li>
+          </ul>
+          <button v-if="pollFailed && !changed" type="button" @click="retryPoll">
+            進捗を再確認
+          </button>
+        </div>
+        <template v-if="result">
           <p class="subtle">{{ result.dateFrom }} 〜 {{ result.dateTo }}・取得時刻は日本時間</p>
           <p v-if="changed" class="notice" role="status">
             条件が変更されています。表示中の結果は前回検索時の条件です。再検索してください。
@@ -182,7 +197,7 @@ function parkName(id: string): string {
             class="notice"
             role="status"
           >
-            前回の古い結果を表示しています。最新の取得は失敗しました。
+            前回の古い結果を表示しています。範囲ごとの最新の取得状態も確認してください。
           </p>
           <details class="coverage" open>
             <summary>範囲ごとの取得状態</summary>
@@ -214,7 +229,7 @@ function parkName(id: string): string {
                     scope.latestAttempt?.state === 'running' ||
                     scope.latestAttempt?.state === 'queued'
                   "
-                  >取得待ち（モック）</span
+                  >取得待ち・取得中</span
                 >
               </li>
             </ul>
@@ -238,13 +253,13 @@ function parkName(id: string): string {
               <div class="slot-place">
                 <strong>{{ slot.parkName }}</strong
                 ><span>{{ slot.facilityName }}</span
-                ><small>取得 {{ stamp(slot.observedAt) }}（架空）</small>
+                ><small>取得 {{ stamp(slot.observedAt) }}</small>
               </div>
               <span class="courts">{{ slot.availableCourts }}面</span>
             </li>
           </ul>
           <p class="hint">
-            これは取得時点の情報です。現在の空き状況と予約可否は公式サイトで確認してください。この画面のデータは架空です。
+            これは取得時点の情報です。現在の空き状況と予約可否は公式サイトで確認してください。
           </p>
         </template>
       </section>
