@@ -1,12 +1,17 @@
 import { fileURLToPath, URL } from 'node:url'
 import { defineConfig, loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import tailwindcss from '@tailwindcss/vite'
 import vueDevTools from 'vite-plugin-vue-devtools'
 
 export default defineConfig(({ mode, command }) => {
   const env = loadEnv(mode, process.cwd(), '')
   return {
-    plugins: [vue(), ...(command === 'serve' && mode === 'development' ? [vueDevTools()] : [])],
+    plugins: [
+      tailwindcss(),
+      vue(),
+      ...(command === 'serve' && mode === 'development' ? [vueDevTools()] : []),
+    ],
     resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
     server: {
       host: env.WEB_HOST || '127.0.0.1',

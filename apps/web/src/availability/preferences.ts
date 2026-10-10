@@ -1,5 +1,5 @@
 import * as v from 'valibot'
-import { ConditionFieldsSchema, ConditionsSchema, type Conditions, type Slot } from './schemas'
+import { ConditionFieldsSchema, ConditionsSchema, type Conditions } from './schemas'
 import { defaults } from './model'
 
 const key = 'akicourt.conditions.v1'
@@ -50,7 +50,4 @@ export function saveConditions(storage: Pick<Storage, 'setItem'>, conditions: Co
   } catch {
     return '条件を保存できません。ブラウザの保存設定を確認してください。'
   }
-}
-export function slotText(slot: Slot): string {
-  return `${slot.parkName}\n${slot.facilityName}\n${slot.date} ${slot.start}〜${slot.end}\n取得時点：${slot.observedAt}\n公式サイトで現在の空き状況・予約可否を確認してください。`
 }

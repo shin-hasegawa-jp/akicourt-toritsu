@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import App from '../../App.vue'
 import { defaults, type Slot } from '../../availability/model'
-import { slotText, restoreConditions, saveConditions } from '../../availability/preferences'
+import { restoreConditions, saveConditions } from '../../availability/preferences'
 
 async function searchWithSlot() {
   const slot: Slot = {
@@ -130,27 +130,24 @@ describe('saved conditions and official handoff', () => {
     })
     expect(restored.conditions).toEqual({ ...defaults(), minDurationMinutes: 120 })
   })
-  it('offers manual copy when clipboard is unavailable and opens only the official home', async () => {
-    const { wrapper, slot } = await searchWithSlot()
-    await wrapper
-      .findAll('button')
-      .find((button) => button.text() === 'この枠の条件をコピー')!
-      .trigger('click')
-    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe(slotText(slot))
+  it('shows one common official link and no per-slot actions', async () => {
+    const { wrapper } = await searchWithSlot()
+    expect(wrapper.findAll('a')).toHaveLength(1)
     expect(wrapper.get('a').attributes('href')).toBe('https://kouen.sports.metro.tokyo.lg.jp/web/')
+    expect(wrapper.get('a').attributes('target')).toBe('_blank')
     expect(wrapper.get('a').attributes('rel')).toContain('noopener')
+    expect(wrapper.text()).toContain('検索条件は引き継がれません')
+    expect(wrapper.findAll('.slot button')).toHaveLength(0)
+    expect(wrapper.text()).not.toContain('コピー')
     wrapper.unmount()
   })
-  it('copies a result slot through the clipboard when available', async () => {
-    const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue()
-    vi.stubGlobal('navigator', { clipboard: { writeText } })
-    const { wrapper, slot } = await searchWithSlot()
-    await wrapper
-      .findAll('button')
-      .find((button) => button.text() === 'この枠の条件をコピー')!
-      .trigger('click')
-    expect(writeText).toHaveBeenCalledWith(slotText(slot))
-    expect(wrapper.text()).toContain('コピーしました')
+  it('preserves start-time choices and migrates old interval filters visibly', () => {
+    saveConditions(localStorage, { ...defaults(), startTimes: ['09:00', '13:00'] })
+    expect(restoreConditions(localStorage).conditions.startTimes).toEqual(['09:00', '13:00'])
+    saveConditions(localStorage, { ...defaults(), timeFrom: '10:30', timeTo: '17:00' })
+    const wrapper = mount(App)
+    expect(wrapper.text()).toContain('開始時刻を選び直してください')
+    expect(wrapper.text()).toContain('時間指定なし')
     wrapper.unmount()
   })
 })

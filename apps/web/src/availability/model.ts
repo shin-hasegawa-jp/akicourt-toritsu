@@ -24,6 +24,7 @@ export function defaults(): Conditions {
     dateTo: offset(dateFrom, 6),
     weekdays: [0, 1, 2, 3, 4, 5, 6],
     includeHolidays: false,
+    startTimes: [],
     timeFrom: '00:00',
     timeTo: '24:00',
     minDurationMinutes: 0,

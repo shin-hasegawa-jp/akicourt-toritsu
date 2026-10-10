@@ -159,6 +159,9 @@ export function useAvailability(form: Conditions) {
   onBeforeUnmount(stop)
   return {
     result,
+    appliedConditions: computed<Conditions | null>(() =>
+      applied.value ? (JSON.parse(applied.value) as Conditions) : null,
+    ),
     error,
     notice,
     loading,
