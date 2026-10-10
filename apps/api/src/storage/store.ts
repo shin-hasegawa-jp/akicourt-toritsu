@@ -23,20 +23,26 @@ async function fence(client: PoolClient, owner: string): Promise<void> {
 }
 export class Store {
   constructor(readonly pool: Pool) {}
-  async enqueue(targets: Target[]): Promise<Job[]> {
+  async enqueue(targets: Target[], requireWorker = false): Promise<Job[]> {
     // Sort lock acquisition to avoid deadlocks across overlapping multi-scope requests.
     return transaction(this.pool, async (client) => {
-      const lease = await client.query('SELECT blocked_reason FROM worker_lease WHERE id=1')
-      if (lease.rows[0]?.blocked_reason) throw new Error('worker-blocked')
-      const jobs: Job[] = []
-      for (const target of [...targets].sort((a, b) =>
-        JSON.stringify(a).localeCompare(JSON.stringify(b)),
-      )) {
+      const lease = await client.query(
+        'SELECT blocked_reason, owner IS NOT NULL AND expires_at>clock_timestamp() AS active FROM worker_lease WHERE id=1 FOR SHARE',
+      )
+      // Validate all requested pairs before reporting worker availability.
+      for (const target of targets) {
         const enabled = await client.query(
           'SELECT 1 FROM park_surfaces WHERE park_id=$1 AND surface=$2 AND enabled',
           [target.parkId, target.surface],
         )
         if (!enabled.rowCount) throw new Error('unsupported-target')
+      }
+      if (requireWorker && !lease.rows[0]?.active) throw new Error('worker-unavailable')
+      if (lease.rows[0]?.blocked_reason) throw new Error('worker-blocked')
+      const jobs: Job[] = []
+      for (const target of [...targets].sort((a, b) =>
+        JSON.stringify(a).localeCompare(JSON.stringify(b)),
+      )) {
         await client.query(
           'INSERT INTO acquisition_scopes(id,park_id,surface,week_start) VALUES($1,$2,$3,$4) ON CONFLICT(park_id,surface,week_start) DO NOTHING',
           [randomUUID(), target.parkId, target.surface, target.startDate],

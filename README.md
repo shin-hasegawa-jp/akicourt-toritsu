@@ -1,6 +1,6 @@
 # AkiCourt Toritsu
 
-都立公園のテニスコート空き状況を検索する補助ツール。Vue 3 + TypeScript + Vite、Fastifyを使用。現在はAPI接続確認と、少数公園のHTTP取得・DB保存まで実装済み。
+都立公園のテニスコート空き状況を検索する補助ツール。Vue 3 + TypeScript + Vite、Fastifyを使用。現在は少数公園のHTTP取得・DB保存・検索APIまで実装済み。
 
 ## Dockerで起動
 
@@ -67,6 +67,14 @@ npm run build:ts
 npm test
 ```
 
+## 検索・更新API
+
+```sh
+curl -sS http://127.0.0.1:17590/api/availability/search -H 'Content-Type: application/json' -d '{"targets":[{"parkId":"1280","surface":"grass"}]}'
+```
+
+日付省略時は日本時間の本日から7日間。検索は保存済み情報のみを返す。`POST /api/availability/updates`へ同じ対象・期間を送り、返された`jobId`を`GET /api/availability/updates/:jobId`で確認する。更新には稼働中のワーカーが必要（停止中は503）。祝日条件に必要な年の登録が未完了なら503を返す。祝日実データは未登録。
+
 ## 空き情報の取得検証
 
 `apps/api`でワーカー停止中に実行する。これはDBの制御を使わない検証CLI。公式へ通信するため、繰り返しの実行は避ける。
@@ -77,4 +85,4 @@ npm run acquire -- 2026-10-10 1280:grass 1310:hard
 
 日付は検索開始日、対象は`公園ID:grass`（人工芝）または`:hard`。最大2対象・各7日、直列で2秒間隔、45秒タイムアウト、一時エラーの再試行は1回まで。日付は確認したい日に変更する。結果と取得時刻・通信時間をJSONで出力し、失敗があれば終了コード1を返す。失敗を空きなしと扱わず、未対応の公式状態も失敗として報告する。ブラウザ操作・予約操作は行わない。
 
-機能開発はdevelopからfeatureブランチを作り、develop向けPRでレビューする。検索API・検索UI・定期取得・本番公開は未実装。
+機能開発はdevelopからfeatureブランチを作り、develop向けPRでレビューする。検索UI・定期取得・本番公開は未実装。
