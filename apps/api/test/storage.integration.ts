@@ -83,7 +83,7 @@ void test(
     try {
       await migrate(pool)
       await migrate(pool)
-      assert.equal((await pool.query('SELECT count(*) FROM schema_migrations')).rows[0].count, '1')
+      assert.equal((await pool.query('SELECT count(*) FROM schema_migrations')).rows[0].count, '2')
       const concurrent = await Promise.all(Array.from({ length: 8 }, () => store.enqueue([target])))
       assert.equal(new Set(concurrent.map((j) => j[0].id)).size, 1)
       assert.equal(concurrent.filter((j) => !j[0].reused).length, 1)

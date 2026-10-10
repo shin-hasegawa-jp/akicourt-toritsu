@@ -17,7 +17,7 @@
     "type-check": "tsc --noEmit && tsc -p test/tsconfig.json",
     "acquire": "npm run build:ts && node dist/availability/cli.js",
     "storage": "node -r ts-node/register src/storage/cli.ts",
-    "test:db": "node -e \"if (!process.env.DATABASE_URL) { console.error('DATABASE_URL is required'); process.exit(1) }\" && node --test -r ts-node/register test/storage.integration.ts"
+    "test:db": "node -e \"if (!process.env.DATABASE_URL) { console.error('DATABASE_URL is required'); process.exit(1) }\" && node --test -r ts-node/register test/storage.integration.ts test/availability-api.test.ts"
   },
   "keywords": [],
   "author": "",
