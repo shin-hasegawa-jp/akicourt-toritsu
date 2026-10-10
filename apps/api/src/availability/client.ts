@@ -34,7 +34,10 @@ export type Result = {
   | { state: 'success'; facilities: Facility[] }
   | { state: 'failed'; error: string }
 )
-type Options = {
+export type Options = {
+  signal?: AbortSignal
+  beforeRequest?: () => Promise<void>
+  onProgress?: (count: number) => Promise<void>
   fetchImpl?: typeof fetch
   timeoutMs?: number
   intervalMs?: number
@@ -57,6 +60,9 @@ class Session {
     for (let attempt = 0; attempt < 2; attempt++) {
       if (this.metrics.length)
         await (this.options.sleep || pause)(this.options.intervalMs ?? 2000)
+      this.options.signal?.throwIfAborted()
+      await this.options.beforeRequest?.()
+      this.options.signal?.throwIfAborted()
       const started = performance.now()
       const controller = new AbortController()
       const timer = setTimeout(
@@ -70,7 +76,7 @@ class Session {
         const response = await (this.options.fetchImpl || fetch)(url, {
           method: fields ? 'POST' : 'GET',
           redirect: 'manual',
-          signal: controller.signal,
+          signal: this.options.signal ? AbortSignal.any([controller.signal, this.options.signal]) : controller.signal,
           headers: {
             ...(cookie ? { cookie } : {}),
             ...(fields
@@ -85,6 +91,8 @@ class Session {
         // Reject redirects rather than silently following a login/error route.
         if (response.status >= 300 && response.status < 400)
           throw new AcquisitionError('unexpected-redirect')
+        if (response.status === 403 || response.status === 429)
+          throw new AcquisitionError('access-blocked')
         if (!response.ok)
           throw new AcquisitionError(
             response.status >= 500 ? 'server-error' : 'http-error'
@@ -102,7 +110,7 @@ class Session {
           error instanceof AcquisitionError
             ? error
             : new AcquisitionError(
-                controller.signal.aborted ? 'timeout' : 'network-error'
+                this.options.signal?.aborted ? 'interrupted' : controller.signal.aborted ? 'timeout' : 'network-error'
               )
         if (
           attempt === 0 &&
@@ -113,6 +121,7 @@ class Session {
       } finally {
         clearTimeout(timer)
         metric.durationMs = Math.round(performance.now() - started)
+        await this.options.onProgress?.(this.metrics.length)
       }
     }
     throw new AcquisitionError('network-error')
@@ -214,7 +223,7 @@ export async function acquire(
         requests: session.metrics,
         state: 'failed',
         error:
-          error instanceof AcquisitionError ? error.kind : 'invalid-response'
+          options.signal?.aborted ? 'interrupted' : error instanceof AcquisitionError ? error.kind : 'invalid-response'
       })
     }
   }
