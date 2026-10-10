@@ -67,6 +67,28 @@ test('only a complete validated week can mean no availability', () => {
   assert.throws(() => parseWeek(JSON.stringify(data), target.startDate))
 })
 
+test('closed days preserve other slots and require an exact label and zero courts', () => {
+  const data = JSON.parse(fixture())
+  const expected = parseWeek(fixture(), target.startDate)
+  // The observed official response uses status=2 / alt=休館日 / rsvNum=0.
+  for (const row of data.result)
+    Object.assign(row.timeResult[0], { status: 2, alt: '休館日', rsvNum: 0 })
+  const week = parseWeek(JSON.stringify(data), target.startDate)
+  assert.equal(week.checkedCells, expected.checkedCells)
+  assert.deepEqual(week.slots, expected.slots.filter((slot) => slot.date !== target.startDate))
+  for (const change of [{ alt: '空き' }, { alt: '保守日' }, { rsvNum: 1 }, { status: '2' }, { status: 3 }]) {
+    const bad = structuredClone(data)
+    Object.assign(bad.result[0].timeResult[0], change)
+    assert.throws(() => parseWeek(JSON.stringify(bad), target.startDate))
+  }
+  for (const row of data.result)
+    for (const cell of row.timeResult)
+      Object.assign(cell, { status: 2, alt: '休館日', rsvNum: 0 })
+  assert.deepEqual(parseWeek(JSON.stringify(data), target.startDate).slots, [])
+  data.result[0].timeResult.pop()
+  assert.throws(() => parseWeek(JSON.stringify(data), target.startDate))
+})
+
 test('elapsed dates outside reception do not invalidate a complete canonical week', () => {
   const data = JSON.parse(fixture('grass-past'))
   const week = parseWeek(JSON.stringify(data), '2026-10-05')
