@@ -1,4 +1,5 @@
 import * as v from 'valibot'
+import { parks } from './parks'
 
 const date = v.pipe(
   v.string(),
@@ -80,7 +81,13 @@ const targetMessage = '公園・種目を1〜2件選んでください。'
 const dateMessage = '開始日と終了日を含め、最大7日間の期間を指定してください。'
 export const ConditionFieldsSchema = v.object({
   targets: v.pipe(
-    v.array(v.picklist(['1280:grass', '1310:hard'], targetMessage), targetMessage),
+    v.array(
+      v.picklist(
+        parks.map((park) => park.key),
+        targetMessage,
+      ),
+      targetMessage,
+    ),
     v.minLength(1, targetMessage),
     v.maxLength(2, targetMessage),
     v.check((keys) => new Set(keys).size === keys.length, targetMessage),

@@ -89,19 +89,28 @@ label {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 12px;
+  padding: 10px;
   border: 1px solid #dbe3da;
   border-radius: 9px;
   margin: 8px 0;
   cursor: pointer;
 }
+.target-options {
+  max-height: 320px;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+.target-group-title {
+  font-size: 13px;
+  margin-top: 14px;
+}
+.selected-targets {
+  margin-bottom: 10px;
+  overflow-wrap: anywhere;
+}
 .target-option:has(input:checked) {
   background: #eef6ef;
   border-color: #5a8c6d;
-}
-.target-option small {
-  display: block;
-  color: #52685e;
 }
 input[type='checkbox'] {
   width: 17px;

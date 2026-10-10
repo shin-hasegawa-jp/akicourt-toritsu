@@ -1,22 +1,7 @@
 import * as v from 'valibot'
 import { ConditionsSchema, type Conditions } from './schemas'
+export { parks, parkGroups } from './parks'
 export type { Conditions, Scope, Slot, SearchResult } from './schemas'
-export const parks = [
-  {
-    key: '1280:grass' as const,
-    parkId: '1280',
-    parkName: '東大和南公園',
-    surface: 'grass' as const,
-    label: '人工芝',
-  },
-  {
-    key: '1310:hard' as const,
-    parkId: '1310',
-    parkName: '大井ふ頭海浜公園Ａ',
-    surface: 'hard' as const,
-    label: 'ハード',
-  },
-]
 export const weekdayNames = ['日', '月', '火', '水', '木', '金', '土']
 export function today(now = new Date()): string {
   return new Intl.DateTimeFormat('sv-SE', {
@@ -34,7 +19,7 @@ export function offset(date: string, days: number): string {
 export function defaults(): Conditions {
   const dateFrom = today()
   return {
-    targets: [parks[0]!.key],
+    targets: ['1280:grass'],
     dateFrom,
     dateTo: offset(dateFrom, 6),
     weekdays: [0, 1, 2, 3, 4, 5, 6],

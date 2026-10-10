@@ -16,7 +16,7 @@
     "dev:start": "fastify start --ignore-watch=.ts$ -w -l info -P --address ${API_HOST:-127.0.0.1} --port ${PORT:-17591} dist/app.js",
     "type-check": "tsc --noEmit && tsc -p test/tsconfig.json",
     "storage": "node -r ts-node/register src/storage/cli.ts",
-    "test:db": "node -e \"if (!process.env.DATABASE_URL) { console.error('DATABASE_URL is required'); process.exit(1) }\" && node --test -r ts-node/register test/storage.integration.ts test/availability-api.test.ts test/holidays.test.ts"
+    "test:db": "node -e \"if (!process.env.DATABASE_URL) { console.error('DATABASE_URL is required'); process.exit(1) }\" && node --test -r ts-node/register test/storage.integration.ts test/availability-api.test.ts test/holidays.test.ts test/parks.test.ts"
   },
   "keywords": [],
   "author": "",

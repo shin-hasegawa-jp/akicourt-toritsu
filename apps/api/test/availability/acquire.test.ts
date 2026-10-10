@@ -41,6 +41,22 @@ test('saved responses preserve dates, times and court counts', () => {
   assert.equal(parseWeek(fixture('hard'), target.startDate).checkedCells, 42)
 })
 
+test('maintenance cells preserve the available slots in the rest of the official week', () => {
+  const data = JSON.parse(fixture('ariake-hard-19'))
+  const week = parseWeek(JSON.stringify(data), '2026-10-19')
+  assert.equal(week.checkedCells, 49)
+  assert.equal(week.slots.length, 5)
+  assert.deepEqual(week.slots[0], { date: '2026-10-19', start: '09:00', end: '11:00', availableCourts: 5 })
+  assert.ok(week.slots.every((slot) => slot.start !== '07:00'))
+  for (const change of [{ alt: '空き' }, { rsvNum: 1 }, { status: '1' }, { status: 2 }]) {
+    const bad = structuredClone(data)
+    Object.assign(bad.result[0].timeResult[0], change)
+    assert.throws(() => parseWeek(JSON.stringify(bad), '2026-10-19'))
+  }
+  data.result[0].timeResult.pop()
+  assert.throws(() => parseWeek(JSON.stringify(data), '2026-10-19'))
+})
+
 test('only a complete validated week can mean no availability', () => {
   const data = JSON.parse(fixture())
   for (const row of data.result)
