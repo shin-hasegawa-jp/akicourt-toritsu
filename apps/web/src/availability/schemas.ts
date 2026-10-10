@@ -106,6 +106,14 @@ export const ConditionFieldsSchema = v.object({
     v.check((days) => new Set(days).size === days.length),
   ),
   includeHolidays: v.boolean(),
+  startTimes: v.optional(
+    v.pipe(
+      v.array(time),
+      v.maxLength(24),
+      v.check((values) => new Set(values).size === values.length),
+    ),
+    [],
+  ),
   timeFrom: time,
   timeTo: endTime,
   minDurationMinutes: v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(1440)),

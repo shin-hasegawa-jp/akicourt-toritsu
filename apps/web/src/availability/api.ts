@@ -26,8 +26,8 @@ export function payload(input: Conditions, update = false) {
         ...base,
         weekdays: [...input.weekdays],
         includeHolidays: input.includeHolidays,
-        timeFrom: input.timeFrom,
-        timeTo: input.timeTo,
+        timeFrom: input.startTimes?.length ? '00:00' : input.timeFrom,
+        timeTo: input.startTimes?.length ? '24:00' : input.timeTo,
         ...(input.minDurationMinutes ? { minDurationMinutes: input.minDurationMinutes } : {}),
       }
 }
@@ -72,7 +72,14 @@ export async function search(input: Conditions, signal: AbortSignal): Promise<Se
   const parsed = v.safeParse(SearchSchema, data)
   if (!parsed.success)
     throw new RequestError('検索結果の形式を確認できません。再試行してください。')
-  return parsed.output
+  // The API's interval filter cannot express disjoint start times. Request the full
+  // day, then filter validated saved slots; preserve the API's coverage metadata.
+  return {
+    ...parsed.output,
+    slots: input.startTimes?.length
+      ? parsed.output.slots.filter((slot) => input.startTimes.includes(slot.start))
+      : parsed.output.slots,
+  }
 }
 export async function updates(
   input: Conditions,
