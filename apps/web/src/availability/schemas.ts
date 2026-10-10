@@ -79,32 +79,33 @@ export const HealthSchema = v.object({ status: v.literal('ok') })
 
 const targetMessage = '公園・種目を1〜2件選んでください。'
 const dateMessage = '開始日と終了日を含め、最大7日間の期間を指定してください。'
+export const ConditionFieldsSchema = v.object({
+  targets: v.pipe(
+    v.array(v.picklist(['1280:grass', '1310:hard'], targetMessage), targetMessage),
+    v.minLength(1, targetMessage),
+    v.maxLength(2, targetMessage),
+    v.check((keys) => new Set(keys).size === keys.length, targetMessage),
+  ),
+  dateFrom: v.pipe(
+    v.string(),
+    v.check((value) => v.safeParse(date, value).success, dateMessage),
+  ),
+  dateTo: v.pipe(
+    v.string(),
+    v.check((value) => v.safeParse(date, value).success, dateMessage),
+  ),
+  weekdays: v.pipe(
+    v.array(v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(6))),
+    v.maxLength(7),
+    v.check((days) => new Set(days).size === days.length),
+  ),
+  includeHolidays: v.boolean(),
+  timeFrom: time,
+  timeTo: endTime,
+  minDurationMinutes: v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(1440)),
+})
 export const ConditionsSchema = v.pipe(
-  v.object({
-    targets: v.pipe(
-      v.array(v.picklist(['1280:grass', '1310:hard'], targetMessage), targetMessage),
-      v.minLength(1, targetMessage),
-      v.maxLength(2, targetMessage),
-      v.check((keys) => new Set(keys).size === keys.length, targetMessage),
-    ),
-    dateFrom: v.pipe(
-      v.string(),
-      v.check((value) => v.safeParse(date, value).success, dateMessage),
-    ),
-    dateTo: v.pipe(
-      v.string(),
-      v.check((value) => v.safeParse(date, value).success, dateMessage),
-    ),
-    weekdays: v.pipe(
-      v.array(v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(6))),
-      v.maxLength(7),
-      v.check((days) => new Set(days).size === days.length),
-    ),
-    includeHolidays: v.boolean(),
-    timeFrom: time,
-    timeTo: endTime,
-    minDurationMinutes: v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(1440)),
-  }),
+  ConditionFieldsSchema,
   v.check(
     (input) =>
       input.dateFrom <= input.dateTo &&

@@ -1,10 +1,50 @@
 <script setup lang="ts">
-import { nextTick, reactive, ref } from 'vue'
+import { nextTick, reactive, ref, watch } from 'vue'
 import ConnectionCheck from './components/ConnectionCheck.vue'
 import { defaults, parks, weekdayNames } from './availability/model'
+import { restoreConditions, saveConditions, slotText } from './availability/preferences'
 import { useAvailability } from './availability/useAvailability'
 
 const form = reactive(defaults())
+const preferenceMessage = ref('')
+try {
+  const saved = restoreConditions(localStorage)
+  Object.assign(form, saved.conditions)
+  preferenceMessage.value = saved.message
+} catch {
+  preferenceMessage.value = 'ブラウザの条件保存を利用できません。検索は利用できます。'
+}
+const copyMessage = ref('')
+const manualCopy = ref('')
+function save() {
+  try {
+    preferenceMessage.value = saveConditions(localStorage, form)
+  } catch {
+    preferenceMessage.value = '条件を保存できません。ブラウザの保存設定を確認してください。'
+  }
+}
+watch(
+  () => [
+    form.targets,
+    form.weekdays,
+    form.includeHolidays,
+    form.timeFrom,
+    form.timeTo,
+    form.minDurationMinutes,
+  ],
+  save,
+  { deep: true },
+)
+async function copy(text: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+    manualCopy.value = ''
+    copyMessage.value = 'コピーしました。公式サイトで条件を指定して確認してください。'
+  } catch {
+    manualCopy.value = text
+    copyMessage.value = '自動コピーを利用できません。下の内容を選択してコピーしてください。'
+  }
+}
 const {
   result,
   error,
@@ -71,6 +111,7 @@ function parkName(id: string): string {
       <section class="panel conditions" aria-labelledby="conditions-title">
         <h2 id="conditions-title">検索条件</h2>
         <p class="subtle">最大2対象・7日間。条件は検索後も編集できます。</p>
+        <p v-if="preferenceMessage" class="hint" role="status">{{ preferenceMessage }}</p>
         <form novalidate @submit.prevent="search">
           <fieldset>
             <legend>公園・種目</legend>
@@ -142,6 +183,22 @@ function parkName(id: string): string {
         </form>
       </section>
       <section class="panel results" aria-labelledby="results-title">
+        <aside class="notice">
+          <a
+            href="https://kouen.sports.metro.tokyo.lg.jp/web/"
+            target="_blank"
+            rel="noopener noreferrer"
+            >公式サイトで確認（別タブ）</a
+          >
+          <p v-if="copyMessage" role="status">{{ copyMessage }}</p>
+          <label v-if="manualCopy"
+            >手動コピー用<textarea
+              readonly
+              :value="manualCopy"
+              @focus="($event.target as HTMLTextAreaElement).select()"
+            />
+          </label>
+        </aside>
         <div class="section-heading">
           <h2 id="results-title" ref="resultHeading" tabindex="-1">検索結果</h2>
           <span v-if="result" class="count">{{ result.slots.length }}枠</span>
@@ -256,6 +313,13 @@ function parkName(id: string): string {
                 ><small>取得 {{ stamp(slot.observedAt) }}</small>
               </div>
               <span class="courts">{{ slot.availableCourts }}面</span>
+              <button
+                type="button"
+                :aria-label="`${slot.parkName} ${slot.date} ${slot.start}の確認条件をコピー`"
+                @click="copy(slotText(slot))"
+              >
+                この枠の条件をコピー
+              </button>
             </li>
           </ul>
           <p class="hint">

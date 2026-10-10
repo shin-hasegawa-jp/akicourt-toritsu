@@ -41,6 +41,7 @@ const job = (state: Job['state'] = 'running'): Job => ({
 })
 const response = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status })
 afterEach(() => {
+  localStorage.clear()
   vi.unstubAllGlobals()
   vi.useRealTimers()
 })
