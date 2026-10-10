@@ -1,0 +1,156 @@
+import { test } from 'node:test'
+import * as assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { acquire, Target } from '../../src/availability/client'
+import {
+  parseFacilities,
+  parseWeek,
+  validateDate
+} from '../../src/availability/parser'
+
+// Fixtures: anonymous public weekly JSON captured on 2026-10-10; no cookies or credentials.
+const fixture = (name = 'grass-11'): string =>
+  readFileSync(join(__dirname, 'fixtures', `${name}.json`), 'utf8')
+const wire = (data: unknown): Response =>
+  new Response(
+    JSON.stringify(data).replace(
+      /[^\x00-\x7f]/g,
+      (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`
+    )
+  )
+const target: Target = {
+  parkId: '1280',
+  surface: 'grass',
+  startDate: '2026-10-10'
+}
+const html =
+  '<input name="displayNo" value="prwrc2000"><input name="selectBldCd" value="1280"><select id="facility-select"><option value="0">choose</option><option value="12800020_3">Tennis</option></select>'
+const options = { sleep: async () => {}, intervalMs: 0 }
+
+test('saved responses preserve dates, times and court counts', () => {
+  const grass = parseWeek(fixture(), target.startDate)
+  assert.equal(grass.checkedCells, 28)
+  assert.equal(grass.slots.length, 15)
+  assert.deepEqual(grass.slots[0], {
+    date: '2026-10-13',
+    start: '09:00',
+    end: '11:00',
+    availableCourts: 4
+  })
+  assert.equal(parseWeek(fixture('hard'), target.startDate).checkedCells, 42)
+})
+
+test('only a complete validated week can mean no availability', () => {
+  const data = JSON.parse(fixture())
+  for (const row of data.result)
+    for (const cell of row.timeResult)
+      Object.assign(cell, { status: 210, alt: '予約あり', rsvNum: 0 })
+  assert.deepEqual(parseWeek(JSON.stringify(data), target.startDate).slots, [])
+  data.result[0].timeResult.pop()
+  assert.throws(() => parseWeek(JSON.stringify(data), target.startDate))
+})
+
+test('HTML, official errors, unknown statuses, duplicates and wrong dates fail', () => {
+  assert.throws(() => parseWeek('<html>error</html>', target.startDate))
+  assert.throws(() => parseWeek('{"ErrManager":{}}', target.startDate))
+  const data = JSON.parse(fixture())
+  data.result[0].timeResult[0].status = 999
+  assert.throws(() => parseWeek(JSON.stringify(data), target.startDate))
+  assert.throws(() => parseWeek(fixture(), '2026-10-11'))
+  assert.throws(() => validateDate('2026-02-30'))
+  const duplicate = JSON.parse(fixture())
+  duplicate.result[0].timeResult[1] = duplicate.result[0].timeResult[0]
+  assert.throws(() => parseWeek(JSON.stringify(duplicate), target.startDate))
+})
+
+test('HTML requires matching screen and park; hidden no-results text is harmless', () => {
+  assert.deepEqual(
+    parseFacilities(html + '<div>空き施設が見つかりませんでした</div>', '1280'),
+    [{ id: '12800020', name: 'Tennis' }]
+  )
+  assert.throws(() => parseFacilities(html, '1310'))
+  assert.throws(() => parseFacilities('<html>Error</html>', '1280'))
+})
+
+test('retain session cookies, send documented fields, and do not log cookies', async () => {
+  let call = 0
+  const fetchImpl: typeof fetch = async (_url, init) => {
+    call++
+    if (call === 1)
+      return new Response('pawab2000', {
+        headers: { 'set-cookie': 'session=fake-test-only; Path=/web/; Secure' }
+      })
+    assert.match(
+      new Headers(init?.headers).get('cookie') || '',
+      /session=fake-test-only/
+    )
+    assert.equal(init?.redirect, 'manual')
+    if (call === 2)
+      return wire({ all: 1, results: [{ bcd: '1280', bcdNm: 'Test park' }] })
+    if (call === 3) return new Response(html)
+    assert.match(String(init?.body), /transVacantMode=11/)
+    return wire(JSON.parse(fixture()))
+  }
+  const [result] = await acquire([target], { ...options, fetchImpl })
+  assert.equal(result?.state, 'success')
+  assert.equal(call, 4)
+  assert.equal(JSON.stringify(result).includes('fake-test-only'), false)
+})
+
+test('a failed target is distinct and the next target can succeed', async () => {
+  let calls = 0
+  const fetchImpl: typeof fetch = async () => {
+    calls++
+    if (calls === 1 || calls === 3) return new Response('pawab2000')
+    if (calls === 2) return new Response('<html>error</html>')
+    if (calls === 4)
+      return wire({ all: 1, results: [{ bcd: '1280', bcdNm: 'Test' }] })
+    if (calls === 5) return new Response(html)
+    return wire(JSON.parse(fixture()))
+  }
+  const results = await acquire([target, target], { ...options, fetchImpl })
+  assert.equal(results[0]?.state, 'failed')
+  assert.equal('facilities' in results[0]!, false)
+  assert.equal(results[1]?.state, 'success')
+})
+
+test('retry server errors once; never retry forbidden or redirects', async () => {
+  for (const status of [503, 403, 302]) {
+    let calls = 0
+    const fetchImpl: typeof fetch = async () => {
+      calls++
+      return new Response('', { status })
+    }
+    const [result] = await acquire([target], { ...options, fetchImpl })
+    assert.equal(result?.state, 'failed')
+    assert.equal(calls, status === 503 ? 2 : 1)
+  }
+})
+
+test('timeout includes response body and retries are bounded', async () => {
+  let calls = 0
+  const fetchImpl: typeof fetch = async (_url, init) => {
+    calls++
+    const response = new Response('')
+    Object.defineProperty(response, 'arrayBuffer', {
+      value: async () =>
+        await new Promise<ArrayBuffer>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            'abort',
+            () => reject(new Error('aborted')),
+            { once: true }
+          )
+        })
+    })
+    return response
+  }
+  const [result] = await acquire([target], {
+    ...options,
+    fetchImpl,
+    timeoutMs: 5
+  })
+  assert.equal(result?.state, 'failed')
+  if (result?.state === 'failed') assert.equal(result.error, 'timeout')
+  assert.equal(calls, 2)
+})
