@@ -3,10 +3,10 @@ import { defineConfig, loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import vueDevTools from 'vite-plugin-vue-devtools'
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ mode, command }) => {
   const env = loadEnv(mode, process.cwd(), '')
   return {
-    plugins: [vue(), vueDevTools()],
+    plugins: [vue(), ...(command === 'serve' && mode === 'development' ? [vueDevTools()] : [])],
     resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
     server: {
       host: env.WEB_HOST || '127.0.0.1',

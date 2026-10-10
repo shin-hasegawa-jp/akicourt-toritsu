@@ -48,17 +48,6 @@ h2 {
   margin: 12px 0;
   color: #624b20;
 }
-.preview-controls {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px 16px;
-  margin: 24px 0;
-}
-.preview-controls h2 {
-  font-size: 14px;
-}
-.preview-controls p,
 .hint,
 .subtle {
   color: #52685e;
@@ -131,11 +120,6 @@ select {
   background: #fff;
   padding: 7px 8px;
   margin-top: 5px;
-}
-.preview-controls select {
-  width: auto;
-  max-width: 100%;
-  margin: 0;
 }
 .two-fields {
   display: grid;
@@ -292,19 +276,6 @@ textarea {
   padding: 5px 9px;
   white-space: nowrap;
 }
-.connection {
-  margin-top: 30px;
-  border-top: 1px solid #dbe3da;
-  padding-top: 18px;
-  color: #52685e;
-  font-size: 12px;
-}
-.connection main {
-  margin-top: 16px;
-}
-.connection h1 {
-  font-size: 20px;
-}
 @media (max-width: 850px) {
   .workspace {
     grid-template-columns: 1fr;
@@ -337,12 +308,6 @@ textarea {
   }
   .slot-place {
     min-width: 110px;
-  }
-  .preview-controls {
-    display: grid;
-  }
-  .preview-controls select {
-    width: 100%;
   }
 }
 

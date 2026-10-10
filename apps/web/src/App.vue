@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { nextTick, reactive, ref, watch } from 'vue'
-import ConnectionCheck from './components/ConnectionCheck.vue'
 import { defaults, parks, weekdayNames } from './availability/model'
 import { restoreConditions, saveConditions, slotText } from './availability/preferences'
 import { useAvailability } from './availability/useAvailability'
@@ -328,9 +327,5 @@ function parkName(id: string): string {
         </template>
       </section>
     </div>
-    <details class="connection">
-      <summary>開発環境の接続確認</summary>
-      <ConnectionCheck />
-    </details>
   </main>
 </template>
