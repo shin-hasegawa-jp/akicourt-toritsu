@@ -51,6 +51,38 @@ test('only a complete validated week can mean no availability', () => {
   assert.throws(() => parseWeek(JSON.stringify(data), target.startDate))
 })
 
+test('elapsed dates outside reception do not invalidate a complete canonical week', () => {
+  const data = JSON.parse(fixture('grass-past'))
+  const week = parseWeek(JSON.stringify(data), '2026-10-05')
+  assert.equal(week.checkedCells, 28)
+  assert.deepEqual(
+    week.days,
+    Array.from({ length: 7 }, (_, i) => `2026-10-${String(i + 5).padStart(2, '0')}`)
+  )
+  assert.deepEqual(week.slots, [])
+  // A synthetic available current-day cell must still be emitted among elapsed days.
+  Object.assign(data.result[0].timeResult[5], { status: 0, alt: '空き', rsvNum: 2 })
+  assert.deepEqual(parseWeek(JSON.stringify(data), '2026-10-05').slots, [
+    { date: '2026-10-10', start: '09:00', end: '11:00', availableCourts: 2 }
+  ])
+})
+
+test('outside reception requires its exact label and zero court count; unknown states still fail', () => {
+  for (const values of [
+    { status: 700, alt: '空き', rsvNum: 0 },
+    { status: 700, alt: '受付期間外', rsvNum: 1 },
+    { status: 701, alt: '受付期間外', rsvNum: 0 },
+    { status: '700', alt: '受付期間外', rsvNum: 0 },
+  ]) {
+    const data = JSON.parse(fixture('grass-past'))
+    Object.assign(data.result[0].timeResult[0], values)
+    assert.throws(() => parseWeek(JSON.stringify(data), '2026-10-05'))
+  }
+  const missing = JSON.parse(fixture('grass-past'))
+  missing.result[0].timeResult.pop()
+  assert.throws(() => parseWeek(JSON.stringify(missing), '2026-10-05'))
+})
+
 test('HTML, official errors, unknown statuses, duplicates and wrong dates fail', () => {
   assert.throws(() => parseWeek('<html>error</html>', target.startDate))
   assert.throws(() => parseWeek('{"ErrManager":{}}', target.startDate))
