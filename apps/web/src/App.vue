@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, reactive, ref, watch } from 'vue'
-import { defaults, parks, weekdayNames } from './availability/model'
+import { defaults, parks, parkGroups, weekdayNames } from './availability/model'
 import { restoreConditions, saveConditions, slotText } from './availability/preferences'
 import { useAvailability } from './availability/useAvailability'
 
@@ -114,11 +114,34 @@ function parkName(id: string): string {
         <form novalidate @submit.prevent="search">
           <fieldset>
             <legend>公園・種目</legend>
-            <label v-for="park in parks" :key="park.key" class="target-option"
-              ><input v-model="form.targets" type="checkbox" :value="park.key" /><span
-                >{{ park.parkName }}<small>{{ park.label }}</small></span
-              ></label
-            >
+            <p class="hint selected-targets">
+              選択中：{{
+                parks
+                  .filter((park) => form.targets.includes(park.key))
+                  .map((park) => `${park.parkName}（${park.label}）`)
+                  .join('、') || 'なし'
+              }}
+            </p>
+            <div class="target-options">
+              <section
+                v-for="group in parkGroups"
+                :key="group.surface"
+                :aria-label="`テニス（${group.label}）`"
+              >
+                <h3 class="target-group-title">テニス（{{ group.label }}）</h3>
+                <label
+                  v-for="park in parks.filter((park) => park.surface === group.surface)"
+                  :key="park.key"
+                  class="target-option"
+                  ><input
+                    v-model="form.targets"
+                    type="checkbox"
+                    :value="park.key"
+                    :aria-label="`${park.parkName} ${park.label}`"
+                  /><span>{{ park.parkName }}</span></label
+                >
+              </section>
+            </div>
           </fieldset>
           <fieldset>
             <legend>利用する期間</legend>

@@ -1,0 +1,505 @@
+{
+  "dayNum": 7,
+  "lendType": 3,
+  "weekDay": [
+    {
+      "useDay": 20261019
+    },
+    {
+      "useDay": 20261020
+    },
+    {
+      "useDay": 20261021
+    },
+    {
+      "useDay": 20261022
+    },
+    {
+      "useDay": 20261023
+    },
+    {
+      "useDay": 20261024
+    },
+    {
+      "useDay": 20261025
+    }
+  ],
+  "result": [
+    {
+      "tzoneNo": 10,
+      "timeResult": [
+        {
+          "useDay": 20261019,
+          "startTime": 700,
+          "endTime": 900,
+          "status": 1,
+          "alt": "保守日",
+          "rsvNum": 0,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261020,
+          "startTime": 700,
+          "endTime": 900,
+          "status": 1,
+          "alt": "保守日",
+          "rsvNum": 0,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261021,
+          "startTime": 700,
+          "endTime": 900,
+          "status": 1,
+          "alt": "保守日",
+          "rsvNum": 0,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261022,
+          "startTime": 700,
+          "endTime": 900,
+          "status": 1,
+          "alt": "保守日",
+          "rsvNum": 0,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261023,
+          "startTime": 700,
+          "endTime": 900,
+          "status": 1,
+          "alt": "保守日",
+          "rsvNum": 0,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261024,
+          "startTime": 700,
+          "endTime": 900,
+          "status": 1,
+          "alt": "保守日",
+          "rsvNum": 0,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261025,
+          "startTime": 700,
+          "endTime": 900,
+          "status": 1,
+          "alt": "保守日",
+          "rsvNum": 0,
+          "selectNum": 0
+        }
+      ]
+    },
+    {
+      "tzoneNo": 20,
+      "timeResult": [
+        {
+          "useDay": 20261019,
+          "startTime": 900,
+          "endTime": 1100,
+          "status": 0,
+          "alt": "空き",
+          "rsvNum": 5,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261020,
+          "startTime": 900,
+          "endTime": 1100,
+          "status": 210,
+          "alt": "予約あり",
+          "rsvNum": 0,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261021,
+          "startTime": 900,
+          "endTime": 1100,
+          "status": 210,
+          "alt": "予約あり",
+          "rsvNum": 0,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261022,
+          "startTime": 900,
+          "endTime": 1100,
+          "status": 210,
+          "alt": "予約あり",
+          "rsvNum": 0,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261023,
+          "startTime": 900,
+          "endTime": 1100,
+          "status": 210,
+          "alt": "予約あり",
+          "rsvNum": 0,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261024,
+          "startTime": 900,
+          "endTime": 1100,
+          "status": 210,
+          "alt": "予約あり",
+          "rsvNum": 0,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261025,
+          "startTime": 900,
+          "endTime": 1100,
+          "status": 210,
+          "alt": "予約あり",
+          "rsvNum": 0,
+          "selectNum": 0
+        }
+      ]
+    },
+    {
+      "tzoneNo": 30,
+      "timeResult": [
+        {
+          "useDay": 20261019,
+          "startTime": 1100,
+          "endTime": 1300,
+          "status": 0,
+          "alt": "空き",
+          "rsvNum": 3,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261020,
+          "startTime": 1100,
+          "endTime": 1300,
+          "status": 210,
+          "alt": "予約あり",
+          "rsvNum": 0,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261021,
+          "startTime": 1100,
+          "endTime": 1300,
+          "status": 210,
+          "alt": "予約あり",
+          "rsvNum": 0,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261022,
+          "startTime": 1100,
+          "endTime": 1300,
+          "status": 210,
+          "alt": "予約あり",
+          "rsvNum": 0,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261023,
+          "startTime": 1100,
+          "endTime": 1300,
+          "status": 210,
+          "alt": "予約あり",
+          "rsvNum": 0,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261024,
+          "startTime": 1100,
+          "endTime": 1300,
+          "status": 210,
+          "alt": "予約あり",
+          "rsvNum": 0,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261025,
+          "startTime": 1100,
+          "endTime": 1300,
+          "status": 210,
+          "alt": "予約あり",
+          "rsvNum": 0,
+          "selectNum": 0
+        }
+      ]
+    },
+    {
+      "tzoneNo": 40,
+      "timeResult": [
+        {
+          "useDay": 20261019,
+          "startTime": 1300,
+          "endTime": 1500,
+          "status": 0,
+          "alt": "空き",
+          "rsvNum": 7,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261020,
+          "startTime": 1300,
+          "endTime": 1500,
+          "status": 210,
+          "alt": "予約あり",
+          "rsvNum": 0,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261021,
+          "startTime": 1300,
+          "endTime": 1500,
+          "status": 210,
+          "alt": "予約あり",
+          "rsvNum": 0,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261022,
+          "startTime": 1300,
+          "endTime": 1500,
+          "status": 210,
+          "alt": "予約あり",
+          "rsvNum": 0,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261023,
+          "startTime": 1300,
+          "endTime": 1500,
+          "status": 210,
+          "alt": "予約あり",
+          "rsvNum": 0,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261024,
+          "startTime": 1300,
+          "endTime": 1500,
+          "status": 210,
+          "alt": "予約あり",
+          "rsvNum": 0,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261025,
+          "startTime": 1300,
+          "endTime": 1500,
+          "status": 210,
+          "alt": "予約あり",
+          "rsvNum": 0,
+          "selectNum": 0
+        }
+      ]
+    },
+    {
+      "tzoneNo": 50,
+      "timeResult": [
+        {
+          "useDay": 20261019,
+          "startTime": 1500,
+          "endTime": 1700,
+          "status": 0,
+          "alt": "空き",
+          "rsvNum": 4,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261020,
+          "startTime": 1500,
+          "endTime": 1700,
+          "status": 0,
+          "alt": "空き",
+          "rsvNum": 3,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261021,
+          "startTime": 1500,
+          "endTime": 1700,
+          "status": 210,
+          "alt": "予約あり",
+          "rsvNum": 0,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261022,
+          "startTime": 1500,
+          "endTime": 1700,
+          "status": 210,
+          "alt": "予約あり",
+          "rsvNum": 0,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261023,
+          "startTime": 1500,
+          "endTime": 1700,
+          "status": 210,
+          "alt": "予約あり",
+          "rsvNum": 0,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261024,
+          "startTime": 1500,
+          "endTime": 1700,
+          "status": 210,
+          "alt": "予約あり",
+          "rsvNum": 0,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261025,
+          "startTime": 1500,
+          "endTime": 1700,
+          "status": 210,
+          "alt": "予約あり",
+          "rsvNum": 0,
+          "selectNum": 0
+        }
+      ]
+    },
+    {
+      "tzoneNo": 60,
+      "timeResult": [
+        {
+          "useDay": 20261019,
+          "startTime": 1700,
+          "endTime": 1900,
+          "status": 210,
+          "alt": "予約あり",
+          "rsvNum": 0,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261020,
+          "startTime": 1700,
+          "endTime": 1900,
+          "status": 210,
+          "alt": "予約あり",
+          "rsvNum": 0,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261021,
+          "startTime": 1700,
+          "endTime": 1900,
+          "status": 210,
+          "alt": "予約あり",
+          "rsvNum": 0,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261022,
+          "startTime": 1700,
+          "endTime": 1900,
+          "status": 210,
+          "alt": "予約あり",
+          "rsvNum": 0,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261023,
+          "startTime": 1700,
+          "endTime": 1900,
+          "status": 210,
+          "alt": "予約あり",
+          "rsvNum": 0,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261024,
+          "startTime": 1700,
+          "endTime": 1900,
+          "status": 210,
+          "alt": "予約あり",
+          "rsvNum": 0,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261025,
+          "startTime": 1700,
+          "endTime": 1900,
+          "status": 210,
+          "alt": "予約あり",
+          "rsvNum": 0,
+          "selectNum": 0
+        }
+      ]
+    },
+    {
+      "tzoneNo": 70,
+      "timeResult": [
+        {
+          "useDay": 20261019,
+          "startTime": 1900,
+          "endTime": 2100,
+          "status": 210,
+          "alt": "予約あり",
+          "rsvNum": 0,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261020,
+          "startTime": 1900,
+          "endTime": 2100,
+          "status": 210,
+          "alt": "予約あり",
+          "rsvNum": 0,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261021,
+          "startTime": 1900,
+          "endTime": 2100,
+          "status": 210,
+          "alt": "予約あり",
+          "rsvNum": 0,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261022,
+          "startTime": 1900,
+          "endTime": 2100,
+          "status": 210,
+          "alt": "予約あり",
+          "rsvNum": 0,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261023,
+          "startTime": 1900,
+          "endTime": 2100,
+          "status": 210,
+          "alt": "予約あり",
+          "rsvNum": 0,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261024,
+          "startTime": 1900,
+          "endTime": 2100,
+          "status": 210,
+          "alt": "予約あり",
+          "rsvNum": 0,
+          "selectNum": 0
+        },
+        {
+          "useDay": 20261025,
+          "startTime": 1900,
+          "endTime": 2100,
+          "status": 210,
+          "alt": "予約あり",
+          "rsvNum": 0,
+          "selectNum": 0
+        }
+      ]
+    }
+  ]
+}
