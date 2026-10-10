@@ -156,11 +156,14 @@ export function parseWeek(text: string, startDate: string): Week {
       const key = `${date}/${start}/${end}`
       if (keys.has(key)) return fail()
       keys.add(key)
-      if (cell.status !== 0 && cell.status !== 210)
+      // Observed on elapsed dates in the canonical week: 700 means outside reception.
+      // It is a confirmed non-bookable cell, never an available slot.
+      if (cell.status !== 0 && cell.status !== 210 && cell.status !== 700)
         throw new AcquisitionError('unknown-status')
       if (
         (cell.status === 0 && (cell.alt !== '空き' || cell.rsvNum < 1)) ||
-        (cell.status === 210 && (cell.alt !== '予約あり' || cell.rsvNum !== 0))
+        (cell.status === 210 && (cell.alt !== '予約あり' || cell.rsvNum !== 0)) ||
+        (cell.status === 700 && (cell.alt !== '受付期間外' || cell.rsvNum !== 0))
       )
         return fail()
       if (cell.status === 0)
