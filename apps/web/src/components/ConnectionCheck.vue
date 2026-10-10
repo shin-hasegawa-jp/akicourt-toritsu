@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import * as v from 'valibot'
+import { HealthSchema } from '../availability/schemas'
 
 const status = ref('未確認')
 const checking = ref(false)
@@ -15,7 +17,7 @@ async function checkConnection() {
     const response = await fetch('/api/health', { signal: controller.signal })
     if (!response.ok) throw new Error('HTTP error')
     const body: unknown = await response.json()
-    if (!body || typeof body !== 'object' || !('status' in body) || body.status !== 'ok') {
+    if (!v.safeParse(HealthSchema, body).success) {
       throw new Error('Unexpected response')
     }
     status.value = '接続成功'
