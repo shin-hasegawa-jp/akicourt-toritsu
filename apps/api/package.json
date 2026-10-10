@@ -14,7 +14,8 @@
     "watch:ts": "tsc -w",
     "dev": "npm run build:ts && concurrently -k -p \"[{name}]\" -n \"TypeScript,App\" -c \"yellow.bold,cyan.bold\" \"npm:watch:ts\" \"npm:dev:start\"",
     "dev:start": "fastify start --ignore-watch=.ts$ -w -l info -P --address ${API_HOST:-127.0.0.1} --port ${PORT:-17591} dist/app.js",
-    "type-check": "tsc --noEmit && tsc -p test/tsconfig.json"
+    "type-check": "tsc --noEmit && tsc -p test/tsconfig.json",
+    "acquire": "npm run build:ts && node dist/availability/cli.js"
   },
   "keywords": [],
   "author": "",
