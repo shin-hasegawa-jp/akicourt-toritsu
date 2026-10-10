@@ -1,8 +1,54 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import App from '../../App.vue'
-import { defaults } from '../../availability/model'
-import { conditionsText, restoreConditions, saveConditions } from '../../availability/preferences'
+import { defaults, type Slot } from '../../availability/model'
+import { slotText, restoreConditions, saveConditions } from '../../availability/preferences'
+
+async function searchWithSlot() {
+  const slot: Slot = {
+    parkId: '1280',
+    surface: 'grass',
+    parkName: '東大和南公園',
+    facilityId: 'test-facility',
+    facilityName: 'テニス（人工芝）',
+    date: defaults().dateFrom,
+    start: '09:00',
+    end: '11:00',
+    availableCourts: 1,
+    snapshotId: 'test-snapshot',
+    observedAt: new Date().toISOString(),
+  }
+  vi.stubGlobal(
+    'fetch',
+    vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          generatedAt: slot.observedAt,
+          dateFrom: defaults().dateFrom,
+          dateTo: defaults().dateTo,
+          coverage: 'complete',
+          officialUrl: 'https://kouen.sports.metro.tokyo.lg.jp/web/',
+          scopes: [
+            {
+              parkId: slot.parkId,
+              surface: slot.surface,
+              weekStart: slot.date,
+              dataState: 'fresh',
+              snapshotId: slot.snapshotId,
+              lastSuccessAt: slot.observedAt,
+              latestAttempt: null,
+            },
+          ],
+          slots: [slot],
+        }),
+      ),
+    ),
+  )
+  const wrapper = mount(App)
+  await wrapper.get('form').trigger('submit')
+  await flushPromises()
+  return { wrapper, slot }
+}
 
 afterEach(() => {
   localStorage.clear()
@@ -21,7 +67,8 @@ describe('saved conditions and official handoff', () => {
     expect((wrapper.get('#duration').element as HTMLSelectElement).value).toBe('120')
     expect((wrapper.get('#date-from').element as HTMLInputElement).value).toBe('2026-10-11')
     expect((wrapper.get('#date-to').element as HTMLInputElement).value).toBe('2026-10-17')
-    expect(wrapper.text()).toContain('期間は本日から7日間')
+    expect(wrapper.text()).not.toContain('条件を復元しました')
+    expect(wrapper.text()).not.toContain('自動保存されます')
     expect(fetch).not.toHaveBeenCalled()
     wrapper.unmount()
   })
@@ -84,30 +131,25 @@ describe('saved conditions and official handoff', () => {
     expect(restored.conditions).toEqual({ ...defaults(), minDurationMinutes: 120 })
   })
   it('offers manual copy when clipboard is unavailable and opens only the official home', async () => {
-    const wrapper = mount(App)
+    const { wrapper, slot } = await searchWithSlot()
     await wrapper
       .findAll('button')
-      .find((button) => button.text() === '入力中の条件をコピー')!
+      .find((button) => button.text() === 'この枠の条件をコピー')!
       .trigger('click')
-    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe(
-      conditionsText(defaults()),
-    )
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe(slotText(slot))
     expect(wrapper.get('a').attributes('href')).toBe('https://kouen.sports.metro.tokyo.lg.jp/web/')
     expect(wrapper.get('a').attributes('rel')).toContain('noopener')
     wrapper.unmount()
   })
-  it('copies current inputs through the clipboard when available', async () => {
+  it('copies a result slot through the clipboard when available', async () => {
     const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue()
     vi.stubGlobal('navigator', { clipboard: { writeText } })
-    const wrapper = mount(App)
-    await wrapper.get('#duration').setValue('120')
+    const { wrapper, slot } = await searchWithSlot()
     await wrapper
       .findAll('button')
-      .find((button) => button.text() === '入力中の条件をコピー')!
+      .find((button) => button.text() === 'この枠の条件をコピー')!
       .trigger('click')
-    expect(writeText).toHaveBeenCalledWith(
-      conditionsText({ ...defaults(), minDurationMinutes: 120 }),
-    )
+    expect(writeText).toHaveBeenCalledWith(slotText(slot))
     expect(wrapper.text()).toContain('コピーしました')
     wrapper.unmount()
   })

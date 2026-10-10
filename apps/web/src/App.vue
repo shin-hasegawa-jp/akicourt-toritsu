@@ -2,12 +2,7 @@
 import { nextTick, reactive, ref, watch } from 'vue'
 import ConnectionCheck from './components/ConnectionCheck.vue'
 import { defaults, parks, weekdayNames } from './availability/model'
-import {
-  conditionsText,
-  restoreConditions,
-  saveConditions,
-  slotText,
-} from './availability/preferences'
+import { restoreConditions, saveConditions, slotText } from './availability/preferences'
 import { useAvailability } from './availability/useAvailability'
 
 const form = reactive(defaults())
@@ -116,7 +111,6 @@ function parkName(id: string): string {
       <section class="panel conditions" aria-labelledby="conditions-title">
         <h2 id="conditions-title">検索条件</h2>
         <p class="subtle">最大2対象・7日間。条件は検索後も編集できます。</p>
-        <p class="hint">期間以外の条件は、このブラウザに自動保存されます。</p>
         <p v-if="preferenceMessage" class="hint" role="status">{{ preferenceMessage }}</p>
         <form novalidate @submit.prevent="search">
           <fieldset>
@@ -196,10 +190,6 @@ function parkName(id: string): string {
             rel="noopener noreferrer"
             >公式サイトで確認（別タブ）</a
           >
-          <p class="hint">
-            公式の「空き状況」から公園・種目・日付を指定してください。条件は自動入力されません。
-          </p>
-          <button type="button" @click="copy(conditionsText(form))">入力中の条件をコピー</button>
           <p v-if="copyMessage" role="status">{{ copyMessage }}</p>
           <label v-if="manualCopy"
             >手動コピー用<textarea
