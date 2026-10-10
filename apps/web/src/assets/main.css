@@ -244,11 +244,21 @@ summary {
 }
 .slot {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 16px;
   padding: 18px 0;
   border-top: 1px solid #e1e7df;
   font-size: 12px;
+}
+textarea {
+  display: block;
+  width: 100%;
+  min-height: 160px;
+  margin-top: 8px;
+}
+.slot button {
+  margin-left: auto;
 }
 .slot-date {
   flex: 0 0 120px;
