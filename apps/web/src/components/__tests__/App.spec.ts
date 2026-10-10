@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
-import App from '../../App.vue'
+import ConnectionCheck from '../ConnectionCheck.vue'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -16,7 +16,7 @@ describe('API connection', () => {
           }),
       ),
     )
-    const wrapper = mount(App)
+    const wrapper = mount(ConnectionCheck)
     await wrapper.get('button').trigger('click')
     await wrapper.get('input').setValue('通信中の入力')
     expect((wrapper.get('input').element as HTMLInputElement).value).toBe('通信中の入力')
@@ -34,7 +34,7 @@ describe('API connection', () => {
       .mockRejectedValueOnce(new Error('offline'))
       .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'ok' })))
     vi.stubGlobal('fetch', fetch)
-    const wrapper = mount(App)
+    const wrapper = mount(ConnectionCheck)
     await wrapper.get('button').trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('接続できません')
