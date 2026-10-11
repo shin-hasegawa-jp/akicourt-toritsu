@@ -140,6 +140,15 @@ export function parseWeek(text: string, startDate: string): Week {
     for (const cell of row.timeResult) {
       if (!record(cell)) return fail()
       const date = day(cell.useDay)
+      // Official outside-hours placeholders have no actual time interval.
+      if (cell.status === 600) {
+        if (!days.includes(date) || seenDays.has(date) || cell.alt !== '時間外' ||
+            cell.startTime !== -1 || cell.endTime !== -1 || cell.rsvNum !== 0 || cell.selectNum !== 0)
+          return fail()
+        seenDays.add(date)
+        checkedCells++
+        continue
+      }
       const start = time(cell.startTime)
       const end = time(cell.endTime)
       if (
