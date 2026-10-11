@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: Web
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Lint (without fixes)
+        run: |
+          npx --no-install eslint .
+          npx --no-install oxlint .
+      - name: Type check and build
+        run: npm run build
+      - name: Unit tests
+        run: npm run test:unit -- --run
+
+  api:
+    name: API
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/api
+    services:
+      postgres:
+        image: postgres:18.6-alpine3.23
+        env:
+          POSTGRES_USER: akicourt
+          POSTGRES_PASSWORD: ci-password
+          POSTGRES_DB: akicourt_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U akicourt -d akicourt_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: apps/api/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Type check
+        run: npm run type-check
+      - name: Build and unit tests
+        run: npm test
+      - name: PostgreSQL integration tests
+        run: npm run test:db
+        env:
+          DATABASE_URL: postgresql://akicourt:ci-password@127.0.0.1:5432/akicourt_test
