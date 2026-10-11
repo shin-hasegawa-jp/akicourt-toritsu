@@ -38,6 +38,7 @@ export type Result = {
 export class AcquisitionSession {
   readonly jar = new CookieJar()
   initialized = false
+  readonly prepared = new Set<string>()
   initializationRetryAt = 0
   initializationError = 'invalid-home'
   readonly targets = new Map<string, { parkName: string; facilities: Array<{ id: string; name: string }> }>()
@@ -112,11 +113,15 @@ class Session {
         const bytes = await response.arrayBuffer()
         if (bytes.byteLength > 2_000_000)
           throw new AcquisitionError('response-too-large')
+        let text: string
         try {
-          return new TextDecoder('shift_jis', { fatal: true }).decode(bytes)
+          text = new TextDecoder('shift_jis', { fatal: true }).decode(bytes)
         } catch {
           throw new AcquisitionError('invalid-encoding')
         }
+        if (/<html[\s>]/i.test(text) && text.includes('セッションタイムアウトが発生しました。'))
+          throw new AcquisitionError('session-expired')
+        return text
       } catch (error) {
         const classified =
           error instanceof AcquisitionError
@@ -166,82 +171,107 @@ export async function acquire(
     const attemptedAt = new Date().toISOString()
     let parkName: string | undefined
     try {
-      if (!state.initialized) {
-        if (Date.now() < state.initializationRetryAt)
-          throw new AcquisitionError(state.initializationError)
+      for (let recovery = 0; recovery < 2; recovery++) {
         try {
-          const home = await session.request('/web/')
-          if (!home.includes('pawab2000')) throw new AcquisitionError('invalid-home')
-          state.initialized = true
+          if (Date.now() < state.initializationRetryAt)
+            throw new AcquisitionError(state.initializationError)
+          if (!state.initialized) {
+            try {
+              const home = await session.request('/web/')
+              if (!home.includes('pawab2000')) throw new AcquisitionError('invalid-home')
+              state.initialized = true
+              state.prepared.clear()
+              state.initializationRetryAt = 0
+            } catch (error) {
+              state.initializationRetryAt = Date.now() + 15 * 60 * 1000
+              state.initializationError = error instanceof AcquisitionError ? error.kind : 'invalid-response'
+              throw error
+            }
+          }
+          const key = `${target.parkId}/${target.surface}`
+          let cached = state.targets.get(key)
+          if (!cached) {
+            const purpose = target.surface === 'grass' ? '1030' : '1020'
+            const parks = parseParks(
+              await session.request('/web/rsvWTransFavorite2InfoBuildAjaxAction.do', {
+                displayNo: 'prwre1000',
+                selectPpsdCd: '1000',
+                selectPpsCd: purpose,
+                selectAreaCd: '0'
+              })
+            )
+            const park = parks.find((row) => row.id === target.parkId)
+            if (!park) throw new AcquisitionError('park-not-found')
+            cached = { parkName: park.name, facilities: [] }
+          }
+          if (!state.prepared.has(key)) {
+            const purpose = target.surface === 'grass' ? '1030' : '1020'
+            const facilities = parseFacilities(
+              await session.request('/web/rsvWOpeInstSrchVacantAction.do', {
+                daystart: target.startDate,
+                daystarthome: target.startDate,
+                selectPpsClPpscd: `1000_${purpose}`,
+                selectPpsClsCd: '1000',
+                selectPpsCd: purpose,
+                selectAreaBcd: target.parkId,
+                selectBldCd: target.parkId,
+                selectIcd: '0',
+                dayofweekClearFlg: '1',
+                timezoneClearFlg: '1',
+                displayNo: 'pawab2000',
+                displayNoFrm: 'pawab2000'
+              }),
+              target.parkId
+            )
+            if (facilities.length > 4)
+              throw new AcquisitionError('too-many-facilities')
+            cached = { parkName: cached!.parkName, facilities }
+            state.prepared.add(key)
+            state.targets.set(key, cached)
+          }
+          parkName = cached!.parkName
+          const collected: Facility[] = []
+          for (const facility of cached!.facilities) {
+            const week = parseWeek(
+              await session.request('/web/rsvWOpeInstSrchVacantAjaxAction.do', {
+                displayNo: 'prwrc2000',
+                useDay: target.startDate.replaceAll('-', ''),
+                bldCd: target.parkId,
+                instCd: facility.id,
+                transVacantMode: '11',
+                clearFlag: '0'
+              }),
+              target.startDate
+            )
+            collected.push({ ...facility, week })
+          }
+          results.push({
+            target,
+            parkName,
+            attemptedAt,
+            completedAt: new Date().toISOString(),
+            durationMs: Math.round(performance.now() - started),
+            requests: session.metrics,
+            state: 'success',
+            facilities: collected
+          })
+          break
         } catch (error) {
-          state.initializationRetryAt = Date.now() + 15 * 60 * 1000
-          state.initializationError = error instanceof AcquisitionError ? error.kind : 'invalid-response'
+          if (error instanceof AcquisitionError && error.kind === 'session-expired') {
+            state.initialized = false
+            state.prepared.clear()
+            await state.jar.removeAllCookies()
+            if (recovery === 0) continue
+          }
+          if (recovery === 1) {
+            state.initialized = false
+            state.prepared.clear()
+            state.initializationRetryAt = Date.now() + 15 * 60 * 1000
+            state.initializationError = error instanceof AcquisitionError ? error.kind : 'invalid-response'
+          }
           throw error
         }
       }
-      const key = `${target.parkId}/${target.surface}`
-      let cached = state.targets.get(key)
-      if (!cached) {
-        const purpose = target.surface === 'grass' ? '1030' : '1020'
-        const parks = parseParks(
-          await session.request('/web/rsvWTransFavorite2InfoBuildAjaxAction.do', {
-            displayNo: 'prwre1000',
-            selectPpsdCd: '1000',
-            selectPpsCd: purpose,
-            selectAreaCd: '0'
-          })
-        )
-        const park = parks.find((row) => row.id === target.parkId)
-        if (!park) throw new AcquisitionError('park-not-found')
-        parkName = park.name
-        const facilities = parseFacilities(
-          await session.request('/web/rsvWOpeInstSrchVacantAction.do', {
-            daystart: target.startDate,
-            daystarthome: target.startDate,
-            selectPpsClPpscd: `1000_${purpose}`,
-            selectPpsClsCd: '1000',
-            selectPpsCd: purpose,
-            selectAreaBcd: target.parkId,
-            selectBldCd: target.parkId,
-            selectIcd: '0',
-            dayofweekClearFlg: '1',
-            timezoneClearFlg: '1',
-            displayNo: 'pawab2000',
-            displayNoFrm: 'pawab2000'
-          }),
-          target.parkId
-        )
-        if (facilities.length > 4)
-          throw new AcquisitionError('too-many-facilities')
-        cached = { parkName: park.name, facilities }
-        state.targets.set(key, cached)
-      }
-      parkName = cached.parkName
-      const collected: Facility[] = []
-      for (const facility of cached.facilities) {
-        const week = parseWeek(
-          await session.request('/web/rsvWOpeInstSrchVacantAjaxAction.do', {
-            displayNo: 'prwrc2000',
-            useDay: target.startDate.replaceAll('-', ''),
-            bldCd: target.parkId,
-            instCd: facility.id,
-            transVacantMode: '11',
-            clearFlag: '0'
-          }),
-          target.startDate
-        )
-        collected.push({ ...facility, week })
-      }
-      results.push({
-        target,
-        parkName,
-        attemptedAt,
-        completedAt: new Date().toISOString(),
-        durationMs: Math.round(performance.now() - started),
-        requests: session.metrics,
-        state: 'success',
-        facilities: collected
-      })
     } catch (error) {
       // A failed target never carries an empty successful result or unvalidated partial data.
       results.push({

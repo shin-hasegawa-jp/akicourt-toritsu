@@ -271,6 +271,8 @@ test('failed initialization is throttled; acquisition errors do not imply sessio
   await acquire([target], opts)
   assert.equal(calls, 2)
   session.initialized = true
+  session.initializationRetryAt = 0
+  session.prepared.add('1280/grass')
   session.targets.set('1280/grass', { parkName: 'Test', facilities: [{ id: '12800020', name: 'Grass' }] })
   const [result] = await acquire([target], opts)
   assert.equal(result?.state, 'failed')
@@ -294,4 +296,69 @@ test('outside-hours placeholders preserve the rest of the week and reject contra
   }
   data.result[0].timeResult[4] = structuredClone(removed)
   assert.throws(() => parseWeek(JSON.stringify(data), target.startDate))
+})
+
+
+const expiredPage = () => new Response(Buffer.from('PGh0bWw+PGJvZHk+g1qDYoNWg4eDk4Neg0ODgINBg0WDZ4KqlK2QtoK1gtyCtYK9gUIgjcSTeIFBlEaP2ILwjXOCwYLEibqCs4KigUI8L2JvZHk+PC9odG1sPg==', 'base64'))
+const readySession = (parkId = '1280', surface: 'grass' | 'hard' = 'grass') => {
+  const state = new AcquisitionSession()
+  state.initialized = true
+  const key = `${parkId}/${surface}`
+  state.prepared.add(key)
+  state.targets.set(key, { parkName: 'Test', facilities: [{ id: `${parkId}0020`, name: surface }] })
+  return state
+}
+
+test('explicit session expiry recovers through home and facilities once, without park catalog', async () => {
+  for (const surface of ['grass', 'hard'] as const) {
+    const state = readySession('1280', surface)
+    const paths: string[] = []
+    const progress: number[] = []
+    const [result] = await acquire([{ ...target, surface }], { ...options, session: state,
+      onProgress: async count => { progress.push(count) },
+      fetchImpl: async (url, init) => {
+        const path = new URL(String(url)).pathname
+        paths.push(path)
+        if (paths.length === 1) return expiredPage()
+        if (path === '/web/') return new Response('pawab2000')
+        if (path.endsWith('InstSrchVacantAction.do')) {
+          assert.equal(new URLSearchParams(String(init?.body)).get('selectPpsCd'), surface === 'grass' ? '1030' : '1020')
+          return new Response(html)
+        }
+        return wire(JSON.parse(fixture()))
+      }
+    })
+    assert.equal(result?.state, 'success')
+    assert.deepEqual(paths, ['/web/rsvWOpeInstSrchVacantAjaxAction.do', '/web/', '/web/rsvWOpeInstSrchVacantAction.do', '/web/rsvWOpeInstSrchVacantAjaxAction.do'])
+    assert.deepEqual(progress, [1, 2, 3, 4])
+    assert.equal(result?.requests.length, 4)
+  }
+})
+
+test('recovery failure waits and repeated expiry is bounded', async () => {
+  for (const failure of ['home', 'facilities', 'week']) {
+    const state = readySession()
+    let calls = 0
+    const opts = { ...options, session: state, fetchImpl: async (url: string | URL | Request) => {
+      calls++
+      const path = new URL(String(url)).pathname
+      if (calls === 1 || failure === 'week' && path.endsWith('InstSrchVacantAjaxAction.do')) return expiredPage()
+      if (path === '/web/') return new Response(failure === 'home' ? '<html>unavailable</html>' : 'pawab2000')
+      return new Response(failure === 'facilities' ? '<html>unavailable</html>' : html)
+    } }
+    assert.equal((await acquire([target], opts))[0]?.state, 'failed')
+    const previous = calls
+    assert.equal((await acquire([target], opts))[0]?.requests.length, 0)
+    assert.equal(calls, previous)
+    assert.ok(calls <= 4)
+    assert.equal(state.initialized, false)
+  }
+})
+
+test('generic HTML and official errors do not trigger session recovery', async () => {
+  for (const response of [() => new Response('<html>Currently unavailable</html>'), () => wire({ ErrManager: { message: 'error' } })]) {
+    const [result] = await acquire([target], { ...options, session: readySession(), fetchImpl: async () => response() })
+    assert.equal(result?.state, 'failed')
+    assert.equal(result?.requests.length, 1)
+  }
 })
