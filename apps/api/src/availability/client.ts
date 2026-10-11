@@ -34,7 +34,17 @@ export type Result = {
   | { state: 'success'; facilities: Facility[] }
   | { state: 'failed'; error: string }
 )
+// Owned by one sequential worker; cookies never leave process memory.
+export class AcquisitionSession {
+  readonly jar = new CookieJar()
+  initialized = false
+  initializationRetryAt = 0
+  initializationError = 'invalid-home'
+  readonly targets = new Map<string, { parkName: string; facilities: Array<{ id: string; name: string }> }>()
+}
+
 export type Options = {
+  session?: AcquisitionSession
   signal?: AbortSignal
   beforeRequest?: () => Promise<void>
   onProgress?: (count: number) => Promise<void>
@@ -48,9 +58,11 @@ const pause = async (ms: number): Promise<void> => {
 }
 
 class Session {
-  private readonly jar = new CookieJar()
+  private readonly jar: CookieJar
   readonly metrics: Metric[] = []
-  constructor(private readonly options: Options) {}
+  constructor(private readonly options: Options, state: AcquisitionSession) {
+    this.jar = state.jar
+  }
   async request(
     path: string,
     fields?: Record<string, string>
@@ -148,47 +160,65 @@ export async function acquire(
   for (const target of targets) {
     if (results.length)
       await (options.sleep || pause)(options.intervalMs ?? 2000)
-    const session = new Session(options)
+    const state = options.session || new AcquisitionSession()
+    const session = new Session(options, state)
     const started = performance.now()
     const attemptedAt = new Date().toISOString()
     let parkName: string | undefined
     try {
-      const home = await session.request('/web/')
-      if (!home.includes('pawab2000'))
-        throw new AcquisitionError('invalid-home')
-      const purpose = target.surface === 'grass' ? '1030' : '1020'
-      const parks = parseParks(
-        await session.request('/web/rsvWTransFavorite2InfoBuildAjaxAction.do', {
-          displayNo: 'prwre1000',
-          selectPpsdCd: '1000',
-          selectPpsCd: purpose,
-          selectAreaCd: '0'
-        })
-      )
-      const park = parks.find((row) => row.id === target.parkId)
-      if (!park) throw new AcquisitionError('park-not-found')
-      parkName = park.name
-      const facilities = parseFacilities(
-        await session.request('/web/rsvWOpeInstSrchVacantAction.do', {
-          daystart: target.startDate,
-          daystarthome: target.startDate,
-          selectPpsClPpscd: `1000_${purpose}`,
-          selectPpsClsCd: '1000',
-          selectPpsCd: purpose,
-          selectAreaBcd: target.parkId,
-          selectBldCd: target.parkId,
-          selectIcd: '0',
-          dayofweekClearFlg: '1',
-          timezoneClearFlg: '1',
-          displayNo: 'pawab2000',
-          displayNoFrm: 'pawab2000'
-        }),
-        target.parkId
-      )
+      if (!state.initialized) {
+        if (Date.now() < state.initializationRetryAt)
+          throw new AcquisitionError(state.initializationError)
+        try {
+          const home = await session.request('/web/')
+          if (!home.includes('pawab2000')) throw new AcquisitionError('invalid-home')
+          state.initialized = true
+        } catch (error) {
+          state.initializationRetryAt = Date.now() + 15 * 60 * 1000
+          state.initializationError = error instanceof AcquisitionError ? error.kind : 'invalid-response'
+          throw error
+        }
+      }
+      const key = `${target.parkId}/${target.surface}`
+      let cached = state.targets.get(key)
+      if (!cached) {
+        const purpose = target.surface === 'grass' ? '1030' : '1020'
+        const parks = parseParks(
+          await session.request('/web/rsvWTransFavorite2InfoBuildAjaxAction.do', {
+            displayNo: 'prwre1000',
+            selectPpsdCd: '1000',
+            selectPpsCd: purpose,
+            selectAreaCd: '0'
+          })
+        )
+        const park = parks.find((row) => row.id === target.parkId)
+        if (!park) throw new AcquisitionError('park-not-found')
+        parkName = park.name
+        const facilities = parseFacilities(
+          await session.request('/web/rsvWOpeInstSrchVacantAction.do', {
+            daystart: target.startDate,
+            daystarthome: target.startDate,
+            selectPpsClPpscd: `1000_${purpose}`,
+            selectPpsClsCd: '1000',
+            selectPpsCd: purpose,
+            selectAreaBcd: target.parkId,
+            selectBldCd: target.parkId,
+            selectIcd: '0',
+            dayofweekClearFlg: '1',
+            timezoneClearFlg: '1',
+            displayNo: 'pawab2000',
+            displayNoFrm: 'pawab2000'
+          }),
+          target.parkId
+        )
+        if (facilities.length > 4)
+          throw new AcquisitionError('too-many-facilities')
+        cached = { parkName: park.name, facilities }
+        state.targets.set(key, cached)
+      }
+      parkName = cached.parkName
       const collected: Facility[] = []
-      if (facilities.length > 4)
-        throw new AcquisitionError('too-many-facilities')
-      for (const facility of facilities) {
+      for (const facility of cached.facilities) {
         const week = parseWeek(
           await session.request('/web/rsvWOpeInstSrchVacantAjaxAction.do', {
             displayNo: 'prwrc2000',
