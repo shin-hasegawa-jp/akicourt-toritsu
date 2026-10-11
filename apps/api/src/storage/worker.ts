@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { setTimeout as sleep } from 'node:timers/promises'
-import { acquire, Options } from '../availability/client'
+import { acquire, AcquisitionSession, Options } from '../availability/client'
 import { Store } from './store'
 
 export async function work(
@@ -24,6 +24,7 @@ export async function work(
         renewing = false
       })
   }, 20000)
+  const session = new AcquisitionSession()
   try {
     while (!combined.aborted) {
       const job = await store.claim(owner)
@@ -36,6 +37,7 @@ export async function work(
         [{ parkId: job.park_id, surface: job.surface, startDate: job.week_start }],
         {
           ...options,
+          session,
           signal: combined,
           intervalMs: 0,
           beforeRequest: async () => {

@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import * as assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { acquire, Target } from '../../src/availability/client'
+import { acquire, AcquisitionSession, Target } from '../../src/availability/client'
 import {
   parseFacilities,
   parseWeek,
@@ -225,6 +225,59 @@ test('timeout includes response body and retries are bounded', async () => {
   assert.equal(calls, 2)
 })
 
+
+test('reusable session keeps cookies and facility IDs across jobs with per-job metrics', async () => {
+  const session = new AcquisitionSession()
+  const paths: string[] = []
+  let activePark = '1280'
+  const fetchImpl: typeof fetch = async (url, init) => {
+    const path = new URL(String(url)).pathname
+    paths.push(path)
+    const fields = new URLSearchParams(String(init?.body || ''))
+    if (path === '/web/') return new Response('pawab2000', { headers: { 'set-cookie': 'session=test; Path=/web/; Secure' } })
+    assert.match(new Headers(init?.headers).get('cookie') || '', /session=test/)
+    if (path.includes('Favorite2')) return wire({ all: 2, results: [{ bcd: '1280', bcdNm: 'Grass' }, { bcd: '1310', bcdNm: 'Hard' }] })
+    if (path.endsWith('InstSrchVacantAction.do')) {
+      activePark = fields.get('selectBldCd')!
+      return new Response(html.replaceAll('1280', activePark))
+    }
+    const data = JSON.parse(fixture())
+    const date = Number(fields.get('useDay'))
+    const delta = date === 20261017 ? 7 : 0
+    for (const row of data.weekDay) row.useDay += delta
+    for (const row of data.result) for (const cell of row.timeResult) cell.useDay += delta
+    return wire(data)
+  }
+  const opts = { ...options, session, fetchImpl }
+  const [first] = await acquire([target], opts)
+  const [next] = await acquire([{ ...target, startDate: '2026-10-17' }], opts)
+  const [other] = await acquire([{ ...target, parkId: '1310', surface: 'hard' }], opts)
+  assert.equal(first?.state, 'success')
+  assert.equal(next?.state, 'success')
+  assert.equal(other?.state, 'success')
+  assert.deepEqual([first?.requests.length, next?.requests.length, other?.requests.length], [4, 1, 3])
+  assert.equal(paths.filter(p => p === '/web/').length, 1)
+  assert.equal(paths.length, 8)
+})
+
+test('failed initialization is throttled; acquisition errors do not imply session expiry', async () => {
+  const session = new AcquisitionSession()
+  let calls = 0
+  const opts = { ...options, session, fetchImpl: async () => { calls++; return new Response('<html>unavailable</html>') } }
+  assert.equal((await acquire([target], opts))[0]?.state, 'failed')
+  assert.equal((await acquire([target], opts))[0]?.requests.length, 0)
+  assert.equal(calls, 1)
+  session.initializationRetryAt = 0
+  await acquire([target], opts)
+  assert.equal(calls, 2)
+  session.initialized = true
+  session.targets.set('1280/grass', { parkName: 'Test', facilities: [{ id: '12800020', name: 'Grass' }] })
+  const [result] = await acquire([target], opts)
+  assert.equal(result?.state, 'failed')
+  assert.equal(result?.requests.length, 1)
+  assert.ok(result?.requests[0]?.path.endsWith('InstSrchVacantAjaxAction.do'))
+  assert.equal(session.initialized, true)
+})
 
 test('outside-hours placeholders preserve the rest of the week and reject contradictions', () => {
   const data = JSON.parse(fixture())
