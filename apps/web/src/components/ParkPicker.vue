@@ -109,7 +109,7 @@ defineExpose({ open })
       </footer>
     </div>
     <form method="dialog" class="modal-backdrop">
-      <button aria-label="公園選択を閉じる">閉じる</button>
+      <button type="submit" aria-label="公園選択を閉じる">閉じる</button>
     </form>
   </dialog>
 </template>
