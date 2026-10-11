@@ -278,3 +278,20 @@ test('failed initialization is throttled; acquisition errors do not imply sessio
   assert.ok(result?.requests[0]?.path.endsWith('InstSrchVacantAjaxAction.do'))
   assert.equal(session.initialized, true)
 })
+
+test('outside-hours placeholders preserve the rest of the week and reject contradictions', () => {
+  const data = JSON.parse(fixture())
+  const original = parseWeek(fixture(), target.startDate)
+  const removed = data.result[0].timeResult[3]
+  Object.assign(removed, { status: 600, alt: '時間外', startTime: -1, endTime: -1, rsvNum: 0 })
+  const week = parseWeek(JSON.stringify(data), target.startDate)
+  assert.equal(week.checkedCells, original.checkedCells)
+  assert.deepEqual(week.slots, original.slots.filter(s => !(s.date === '2026-10-13' && s.start === '09:00')))
+  for (const change of [{ alt: '空き' }, { rsvNum: 1 }, { selectNum: 1 }, { startTime: 900 }, { endTime: 1100 }, { status: '600' }, { useDay: 20261101 }]) {
+    const bad = structuredClone(data)
+    Object.assign(bad.result[0].timeResult[3], change)
+    assert.throws(() => parseWeek(JSON.stringify(bad), target.startDate))
+  }
+  data.result[0].timeResult[4] = structuredClone(removed)
+  assert.throws(() => parseWeek(JSON.stringify(data), target.startDate))
+})
