@@ -34,7 +34,7 @@ describe('official tennis park choices', () => {
     }
     expect(validate({ ...defaults(), targets: ['1000:hard'] })).toBeTruthy()
     expect(
-      validate({ ...defaults(), targets: parks.slice(0, 6).map(park => park.key) }),
+      validate({ ...defaults(), targets: parks.slice(0, 6).map((park) => park.key) }),
     ).toBeTruthy()
     expect(payload({ ...defaults(), targets: ['1315:grass', '1315:hard'] }).targets).toEqual([
       { parkId: '1315', surface: 'hard' },

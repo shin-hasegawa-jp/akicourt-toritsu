@@ -97,7 +97,9 @@ describe('Valibot API contracts', () => {
     expect(v.safeParse(ConditionsSchema, input).success).toBe(true)
     const targets = ['1280:grass', '1310:hard', '1000:grass', '1040:grass', '1350:hard']
     expect(v.safeParse(ConditionsSchema, { ...input, targets }).success).toBe(true)
-    expect(v.safeParse(ConditionsSchema, { ...input, targets: [...targets, '1370:hard'] }).success).toBe(false)
+    expect(
+      v.safeParse(ConditionsSchema, { ...input, targets: [...targets, '1370:hard'] }).success,
+    ).toBe(false)
     expect(
       v.safeParse(ConditionsSchema, { ...input, weekdays: [], includeHolidays: true }).success,
     ).toBe(true)

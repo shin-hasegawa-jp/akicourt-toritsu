@@ -11,7 +11,7 @@ import { acquire, Result } from '../src/availability/client'
 import { offsetDate } from '../src/availability/parser'
 import { work } from '../src/storage/worker'
 
-void test('Japan date and canonical scopes', () => {
+test('Japan date and canonical scopes', () => {
   assert.equal(japanToday(new Date('2026-10-09T15:00:00Z')), '2026-10-10')
   assert.deepEqual(
     scopes([{ parkId: '1280', surface: 'grass' }], '2026-10-10', '2026-10-16').map(
@@ -21,7 +21,7 @@ void test('Japan date and canonical scopes', () => {
   )
   assert.throws(() => scopes([{ parkId: '1280', surface: 'grass' }], '2026-10-10', '2026-10-17'))
 })
-void test('403 stops immediately without retry', async () => {
+test('403 stops immediately without retry', async () => {
   let count = 0
   const [result] = await acquire([{ parkId: '1280', surface: 'grass', startDate: '2026-10-12' }], {
     fetchImpl: async () => {
@@ -34,7 +34,7 @@ void test('403 stops immediately without retry', async () => {
   if (result.state === 'failed') assert.equal(result.error, 'access-blocked')
   assert.equal(count, 1)
 })
-void test(
+test(
   'storage transactions and worker control (isolated real PostgreSQL schema)',
   { skip: !process.env.DATABASE_URL },
   async () => {
@@ -166,7 +166,7 @@ void test(
       const wire = (value: unknown): Response =>
         new Response(
           JSON.stringify(value).replace(
-            /[^\x00-\x7f]/g,
+            /[\u0080-\uffff]/g,
             (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`,
           ),
         )
@@ -280,9 +280,13 @@ void test(
   },
 )
 
-
-void test('five targets expand into ten scopes; six targets are rejected', () => {
-  const targets = Array.from({ length: 5 }, (_, i) => ({ parkId: String(1000 + i), surface: 'grass' as const }))
+test('five targets expand into ten scopes; six targets are rejected', () => {
+  const targets = Array.from({ length: 5 }, (_, i) => ({
+    parkId: String(1000 + i),
+    surface: 'grass' as const,
+  }))
   assert.equal(scopes(targets, '2026-10-10', '2026-10-16').length, 10)
-  assert.throws(() => scopes([...targets, { parkId: '1005', surface: 'grass' }], '2026-10-10', '2026-10-16'))
+  assert.throws(() =>
+    scopes([...targets, { parkId: '1005', surface: 'grass' }], '2026-10-10', '2026-10-16'),
+  )
 })

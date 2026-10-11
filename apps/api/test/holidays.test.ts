@@ -11,7 +11,7 @@ import { offsetDate } from '../src/availability/parser'
 import { AvailabilityService } from '../src/availability-api/service'
 import { Input } from '../src/availability-api/input'
 
-void test('verified annual calendars include substitute and national holidays', () => {
+test('verified annual calendars include substitute and national holidays', () => {
   const years = validateCalendar(calendar, [2026, 2027])
   assert.deepEqual(
     years.map((entry) => entry.count),
@@ -22,7 +22,7 @@ void test('verified annual calendars include substitute and national holidays', 
   assert.ok(years[1].holidays.some((row) => row.date === '2027-03-22' && row.name === '休日'))
 })
 
-void test('reject incomplete, corrupted, duplicate, invalid and unavailable annual data', () => {
+test('reject incomplete, corrupted, duplicate, invalid and unavailable annual data', () => {
   const mutate = (change: (data: typeof calendar) => void) => {
     const data = structuredClone(calendar)
     change(data)
@@ -57,7 +57,7 @@ void test('reject incomplete, corrupted, duplicate, invalid and unavailable annu
     assert.throws(() => validateCalendar(calendar, years))
 })
 
-void test(
+test(
   'holiday publication is atomic and repeatable; holiday/OR/year-crossing search uses real DB',
   { skip: !process.env.DATABASE_URL },
   async () => {
