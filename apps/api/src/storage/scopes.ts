@@ -16,7 +16,7 @@ export function scopes(
 ): Target[] {
   validateDate(from)
   validateDate(to)
-  if (from > to || to > offsetDate(from, 6) || !targets.length || targets.length > 2)
+  if (from > to || to > offsetDate(from, 6) || !targets.length || targets.length > 5)
     throw new Error('Invalid range or targets')
   if (new Set(targets.map((t) => `${t.parkId}/${t.surface}`)).size !== targets.length)
     throw new Error('Duplicate target')

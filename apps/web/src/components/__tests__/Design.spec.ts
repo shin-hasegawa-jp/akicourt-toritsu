@@ -61,8 +61,8 @@ function data(): SearchResult {
   }
 }
 describe('responsive search design interactions', () => {
-  it('stages park choices, searches names, enforces two targets and applies atomically', async () => {
-    const wrapper = mount(ParkPicker, { props: { selected: ['1280:grass'] } })
+  it('stages park choices, searches names, enforces five targets and applies atomically', async () => {
+    const wrapper = mount(ParkPicker, { props: { selected: ['1280:grass', '1310:hard', '1000:grass', '1040:grass'] } })
     wrapper.vm.open()
     await flushPromises()
     await wrapper.get('#park-query').setValue('有明')
@@ -71,7 +71,7 @@ describe('responsive search design interactions', () => {
     expect(wrapper.get('input[value="1370:hard"]').attributes('disabled')).toBeDefined()
     expect(wrapper.emitted('apply')).toBeUndefined()
     await wrapper.get('.picker-actions .btn-primary').trigger('click')
-    expect(wrapper.emitted('apply')).toEqual([[['1280:grass', '1350:hard']]])
+    expect(wrapper.emitted('apply')).toEqual([[['1280:grass', '1310:hard', '1000:grass', '1040:grass', '1350:hard']]])
     expect(wrapper.get('dialog').attributes('open')).toBeUndefined()
     wrapper.unmount()
   })
@@ -87,7 +87,7 @@ describe('responsive search design interactions', () => {
     await flushPromises()
     await wrapper.get('#park-query').setValue('見つからない公園')
     expect(wrapper.text()).toContain('一致する公園がありません')
-    expect(wrapper.text()).toContain('1 / 2対象を選択中')
+    expect(wrapper.text()).toContain('1 / 5対象を選択中')
     await wrapper.get('.picker-actions .btn-primary').trigger('click')
     expect(wrapper.emitted('apply')).toEqual([[['1280:grass']]])
     wrapper.unmount()

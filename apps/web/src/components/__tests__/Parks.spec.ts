@@ -25,7 +25,7 @@ describe('official tennis park choices', () => {
     ])
     wrapper.unmount()
   })
-  it('accepts every official choice while keeping the two-target limit and previous default', () => {
+  it('accepts every official choice while keeping the five-target limit and previous default', () => {
     expect(defaults().targets).toEqual(['1280:grass'])
     for (const park of parks) {
       const input = { ...defaults(), targets: [park.key] }
@@ -34,7 +34,7 @@ describe('official tennis park choices', () => {
     }
     expect(validate({ ...defaults(), targets: ['1000:hard'] })).toBeTruthy()
     expect(
-      validate({ ...defaults(), targets: [parks[0]!.key, parks[1]!.key, parks[2]!.key] }),
+      validate({ ...defaults(), targets: parks.slice(0, 6).map(park => park.key) }),
     ).toBeTruthy()
     expect(payload({ ...defaults(), targets: ['1315:grass', '1315:hard'] }).targets).toEqual([
       { parkId: '1315', surface: 'hard' },
