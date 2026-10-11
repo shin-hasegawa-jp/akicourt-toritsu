@@ -3,18 +3,23 @@ import { Store } from './store'
 import { japanToday, scopes } from './scopes'
 import { work } from './worker'
 import { registerHolidays } from './holidays'
+import { checkParkCatalog } from './park-catalog'
 
 async function main(): Promise<void> {
   const [command, ...args] = process.argv.slice(2)
-  if (!['migrate', 'holidays', 'enqueue', 'worker', 'reset-block'].includes(command || ''))
+  if (!['migrate', 'holidays', 'enqueue', 'worker', 'reset-block', 'check-parks'].includes(command || ''))
     throw new Error(
-      'Usage: storage migrate | holidays YEAR [YEAR] | enqueue PARK:grass|hard [PARK:grass|hard] [--from YYYY-MM-DD --to YYYY-MM-DD] | worker [--once] | reset-block',
+      'Usage: storage migrate | holidays YEAR [YEAR] | enqueue PARK:grass|hard [PARK:grass|hard] [--from YYYY-MM-DD --to YYYY-MM-DD] | worker [--once] | reset-block | check-parks',
     )
   const pool = database()
   // Do not print pg errors containing connection details.
   pool.on('error', () => console.error('database-unavailable'))
   const store = new Store(pool)
   try {
+    if (command === 'check-parks') {
+      if (args.length) throw new Error('invalid-arguments')
+      console.log(JSON.stringify(await checkParkCatalog(store), null, 2))
+    }
     if (command === 'holidays') {
       if (!args.length || args.some((arg) => !/^\d{4}$/.test(arg)))
         throw new Error('invalid-arguments')

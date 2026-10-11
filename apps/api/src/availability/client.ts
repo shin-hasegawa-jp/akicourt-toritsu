@@ -45,6 +45,7 @@ export class AcquisitionSession {
 }
 
 export type Options = {
+  parkName?: string
   session?: AcquisitionSession
   signal?: AbortSignal
   beforeRequest?: () => Promise<void>
@@ -190,20 +191,7 @@ export async function acquire(
           }
           const key = `${target.parkId}/${target.surface}`
           let cached = state.targets.get(key)
-          if (!cached) {
-            const purpose = target.surface === 'grass' ? '1030' : '1020'
-            const parks = parseParks(
-              await session.request('/web/rsvWTransFavorite2InfoBuildAjaxAction.do', {
-                displayNo: 'prwre1000',
-                selectPpsdCd: '1000',
-                selectPpsCd: purpose,
-                selectAreaCd: '0'
-              })
-            )
-            const park = parks.find((row) => row.id === target.parkId)
-            if (!park) throw new AcquisitionError('park-not-found')
-            cached = { parkName: park.name, facilities: [] }
-          }
+          if (!cached) cached = { parkName: options.parkName || target.parkId, facilities: [] }
           if (!state.prepared.has(key)) {
             const purpose = target.surface === 'grass' ? '1030' : '1020'
             const facilities = parseFacilities(
@@ -288,4 +276,24 @@ export async function acquire(
     }
   }
   return results
+}
+
+
+export type CatalogPark = { parkId: string; surface: 'grass' | 'hard'; name: string }
+
+export async function acquireParkCatalog(options: Options = {}): Promise<CatalogPark[]> {
+  const session = new Session(options, new AcquisitionSession())
+  const home = await session.request('/web/')
+  if (!home.includes('pawab2000')) throw new AcquisitionError('invalid-home')
+  const output: CatalogPark[] = []
+  for (const surface of ['grass', 'hard'] as const) {
+    const rows = parseParks(await session.request('/web/rsvWTransFavorite2InfoBuildAjaxAction.do', {
+      displayNo: 'prwre1000', selectPpsdCd: '1000',
+      selectPpsCd: surface === 'grass' ? '1030' : '1020', selectAreaCd: '0'
+    }))
+    if (new Set(rows.map(r => r.id)).size !== rows.length || rows.some(r => !/^\d{4}$/.test(r.id)))
+      throw new AcquisitionError('invalid-response')
+    output.push(...rows.map(row => ({ parkId: row.id, surface, name: row.name })))
+  }
+  return output
 }

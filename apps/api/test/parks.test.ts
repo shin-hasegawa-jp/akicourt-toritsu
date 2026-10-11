@@ -46,13 +46,6 @@ void test(
             count++
             if (count === 1) return new Response('pawab2000')
             if (count === 2)
-              return wire(
-                JSON.stringify({
-                  all: 1,
-                  results: [{ bcd: '1350', bcdNm: '有明テニスＡ屋外ハードコート' }],
-                }),
-              )
-            if (count === 3)
               return new Response(
                 '<input name="displayNo" value="prwrc2000"><input name="selectBldCd" value="1350"><select id="facility-select"><option value="13500010_3">Hard</option></select>',
               )
@@ -61,12 +54,12 @@ void test(
         },
         true,
       )
-      assert.equal(count, 4)
+      assert.equal(count, 3)
       const state = await pool.query(
         'SELECT state,request_count FROM acquisition_jobs WHERE id=$1',
         [job.id],
       )
-      assert.deepEqual(state.rows[0], { state: 'succeeded', request_count: 4 })
+      assert.deepEqual(state.rows[0], { state: 'succeeded', request_count: 3 })
       const result = await new AvailabilityService(pool).search({
         targets: [{ parkId: '1350', surface: 'hard' }],
         dateFrom: '2026-10-19',

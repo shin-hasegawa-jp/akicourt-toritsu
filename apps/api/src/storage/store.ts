@@ -8,6 +8,7 @@ export type Job = {
   id: string
   scope_id: string
   state: string
+  park_name?: string
   park_id: string
   surface: 'grass' | 'hard'
   week_start: string
@@ -112,7 +113,7 @@ export class Store {
     return transaction(this.pool, async (client) => {
       await fence(client, owner)
       const result = await client.query(
-        `SELECT j.id,j.scope_id,j.state,s.park_id,s.surface,to_char(s.week_start,'YYYY-MM-DD') AS week_start FROM acquisition_jobs j JOIN acquisition_scopes s ON s.id=j.scope_id WHERE j.state='queued' ORDER BY j.queued_at,j.id LIMIT 1 FOR UPDATE OF j`,
+        `SELECT j.id,j.scope_id,j.state,s.park_id,p.name AS park_name,s.surface,to_char(s.week_start,'YYYY-MM-DD') AS week_start FROM acquisition_jobs j JOIN acquisition_scopes s ON s.id=j.scope_id JOIN park_surfaces p ON p.park_id=s.park_id AND p.surface=s.surface WHERE j.state='queued' ORDER BY j.queued_at,j.id LIMIT 1 FOR UPDATE OF j`,
       )
       const job = result.rows[0]
       if (job)
