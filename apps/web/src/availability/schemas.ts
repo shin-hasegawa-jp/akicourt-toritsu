@@ -77,7 +77,7 @@ export const UpdatesSchema = v.object({
 })
 export const ErrorSchema = v.object({ error: v.object({ code: v.string(), message: v.string() }) })
 
-const targetMessage = '公園・種目を1〜2件選んでください。'
+const targetMessage = '公園・種目を1〜5件選んでください。'
 const dateMessage = '開始日と終了日を含め、最大7日間の期間を指定してください。'
 export const ConditionFieldsSchema = v.object({
   targets: v.pipe(
@@ -89,7 +89,7 @@ export const ConditionFieldsSchema = v.object({
       targetMessage,
     ),
     v.minLength(1, targetMessage),
-    v.maxLength(2, targetMessage),
+    v.maxLength(5, targetMessage),
     v.check((keys) => new Set(keys).size === keys.length, targetMessage),
   ),
   dateFrom: v.pipe(

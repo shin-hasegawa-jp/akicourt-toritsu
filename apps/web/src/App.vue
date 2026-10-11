@@ -169,7 +169,7 @@ function parkName(id: string): string {
         <div class="section-heading">
           <div class="condition-title">
             <h2 id="conditions-title">検索条件</h2>
-            <p class="hint">最大2対象・7日間</p>
+            <p class="hint">最大5対象・7日間</p>
           </div>
           <button
             class="btn btn-sm btn-outline mobile-condition-toggle"

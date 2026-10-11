@@ -18,7 +18,7 @@ function open() {
   dialog.value?.showModal()
 }
 function apply() {
-  if (draft.value.length < 1 || draft.value.length > 2) return
+  if (draft.value.length < 1 || draft.value.length > 5) return
   emit('apply', [...draft.value])
   dialog.value?.close()
 }
@@ -31,7 +31,7 @@ defineExpose({ open })
       <header class="section-heading">
         <div>
           <h2 id="park-picker-title">公園を選択</h2>
-          <p class="hint">公園・種目を最大2対象まで選べます。</p>
+          <p class="hint">公園・種目を最大5対象まで選べます。</p>
         </div>
         <button
           class="btn btn-ghost"
@@ -52,7 +52,7 @@ defineExpose({ open })
         autofocus
       />
       <div class="selected-parks" aria-live="polite">
-        <p class="hint">{{ draft.length }} / 2対象を選択中</p>
+        <p class="hint">{{ draft.length }} / 5対象を選択中</p>
         <button
           v-for="park in parks.filter((p) => draft.includes(p.key))"
           :key="park.key"
@@ -87,7 +87,7 @@ defineExpose({ open })
               type="checkbox"
               :value="park.key"
               :aria-label="`${park.parkName} ${park.label}`"
-              :disabled="draft.length >= 2 && !draft.includes(park.key)"
+              :disabled="draft.length >= 5 && !draft.includes(park.key)"
             />
             <span>{{ park.parkName }}</span>
           </label>
@@ -101,7 +101,7 @@ defineExpose({ open })
         <button
           class="btn btn-primary"
           type="button"
-          :disabled="!draft.length || draft.length > 2"
+          :disabled="!draft.length || draft.length > 5"
           @click="apply"
         >
           選択を適用（{{ draft.length }}対象）

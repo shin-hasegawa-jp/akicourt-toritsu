@@ -150,9 +150,9 @@ export async function acquire(
   targets: Target[],
   options: Options = {}
 ): Promise<Result[]> {
-  // This verification entry point is intentionally limited to two targets and one week each.
-  if (!targets.length || targets.length > 2)
-    throw new Error('Specify one or two targets')
+  // This verification entry point is intentionally limited to five targets and one week each.
+  if (!targets.length || targets.length > 5)
+    throw new Error('Specify one to five targets')
   for (const target of targets) {
     if (
       !/^\d{4}$/.test(target.parkId) ||

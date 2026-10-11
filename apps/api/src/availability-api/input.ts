@@ -66,7 +66,7 @@ export const commonProperties = {
   targets: {
     type: 'array',
     minItems: 1,
-    maxItems: 2,
+    maxItems: 5,
     uniqueItems: true,
     items: {
       type: 'object',
