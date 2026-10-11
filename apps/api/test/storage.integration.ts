@@ -179,8 +179,6 @@ void test(
             starts.push(Date.now())
             if (starts.length === 1) return new Response('pawab2000')
             if (starts.length === 2)
-              return wire({ all: 1, results: [{ bcd: '1280', bcdNm: 'Test' }] })
-            if (starts.length === 3)
               return new Response(
                 '<input name="displayNo" value="prwrc2000"><input name="selectBldCd" value="1280"><select id="facility-select"><option value="12800020_3">Tennis</option></select>',
               )
@@ -189,7 +187,7 @@ void test(
         },
         true,
       )
-      assert.equal(starts.length, 4)
+      assert.equal(starts.length, 3)
       for (let i = 1; i < starts.length; i++) assert.ok(starts[i] - starts[i - 1] >= 2000)
       assert.equal(
         (
@@ -205,7 +203,7 @@ void test(
             'SELECT request_count FROM acquisition_jobs ORDER BY queued_at DESC LIMIT 1',
           )
         ).rows[0].request_count,
-        4,
+        3,
       )
       await expireCooldown()
       await store.enqueue([target])

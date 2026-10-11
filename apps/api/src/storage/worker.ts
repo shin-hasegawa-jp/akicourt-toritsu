@@ -37,6 +37,7 @@ export async function work(
         [{ parkId: job.park_id, surface: job.surface, startDate: job.week_start }],
         {
           ...options,
+          parkName: job.park_name,
           session,
           signal: combined,
           intervalMs: 0,

@@ -156,15 +156,13 @@ test('retain session cookies, send documented fields, and do not log cookies', a
       /session=fake-test-only/
     )
     assert.equal(init?.redirect, 'manual')
-    if (call === 2)
-      return wire({ all: 1, results: [{ bcd: '1280', bcdNm: 'Test park' }] })
-    if (call === 3) return new Response(html)
+    if (call === 2) return new Response(html)
     assert.match(String(init?.body), /transVacantMode=11/)
     return wire(JSON.parse(fixture()))
   }
   const [result] = await acquire([target], { ...options, fetchImpl })
   assert.equal(result?.state, 'success')
-  assert.equal(call, 4)
+  assert.equal(call, 3)
   assert.equal(JSON.stringify(result).includes('fake-test-only'), false)
 })
 
@@ -174,9 +172,7 @@ test('a failed target is distinct and the next target can succeed', async () => 
     calls++
     if (calls === 1 || calls === 3) return new Response('pawab2000')
     if (calls === 2) return new Response('<html>error</html>')
-    if (calls === 4)
-      return wire({ all: 1, results: [{ bcd: '1280', bcdNm: 'Test' }] })
-    if (calls === 5) return new Response(html)
+    if (calls === 4) return new Response(html)
     return wire(JSON.parse(fixture()))
   }
   const results = await acquire([target, target], { ...options, fetchImpl })
@@ -236,7 +232,7 @@ test('reusable session keeps cookies and facility IDs across jobs with per-job m
     const fields = new URLSearchParams(String(init?.body || ''))
     if (path === '/web/') return new Response('pawab2000', { headers: { 'set-cookie': 'session=test; Path=/web/; Secure' } })
     assert.match(new Headers(init?.headers).get('cookie') || '', /session=test/)
-    if (path.includes('Favorite2')) return wire({ all: 2, results: [{ bcd: '1280', bcdNm: 'Grass' }, { bcd: '1310', bcdNm: 'Hard' }] })
+    assert.ok(!path.includes('Favorite2'))
     if (path.endsWith('InstSrchVacantAction.do')) {
       activePark = fields.get('selectBldCd')!
       return new Response(html.replaceAll('1280', activePark))
@@ -255,9 +251,9 @@ test('reusable session keeps cookies and facility IDs across jobs with per-job m
   assert.equal(first?.state, 'success')
   assert.equal(next?.state, 'success')
   assert.equal(other?.state, 'success')
-  assert.deepEqual([first?.requests.length, next?.requests.length, other?.requests.length], [4, 1, 3])
+  assert.deepEqual([first?.requests.length, next?.requests.length, other?.requests.length], [3, 1, 2])
   assert.equal(paths.filter(p => p === '/web/').length, 1)
-  assert.equal(paths.length, 8)
+  assert.equal(paths.length, 6)
 })
 
 test('failed initialization is throttled; acquisition errors do not imply session expiry', async () => {
