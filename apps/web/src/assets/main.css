@@ -1,4 +1,5 @@
 @import 'tailwindcss';
+@import './base.css';
 @plugin 'daisyui' {
   themes: false;
 }
@@ -33,7 +34,6 @@
   --depth: 0;
   --noise: 0;
 }
-@import './base.css';
 #app {
   max-width: 1440px;
   margin: auto;
