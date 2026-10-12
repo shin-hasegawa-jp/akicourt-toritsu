@@ -11,3 +11,5 @@ Fastify + TypeScript。`GET /health`で疎通確認。起動・ポート指定�
 `npm run lint` はNode向けのOxlintと型情報を使うESLintを実行します。`npm run lint:fix` で自動修正できます。ESLintは未処理のPromise（`void`による無視も含む）、同期コールバックへのPromiseの誤用、Promise以外へのawaitを検出します。`node:test`のテスト登録はテストランナーが失敗を管理するため例外ですが、テスト内部の非同期処理は検査対象です。
 
 CIではformat・lint・型チェック・テストを実行し、ファイルの自動修正は行いません。
+
+`DATABASE_URL`を設定したAPIは起動時にマイグレーションと祝日・公園マスターの同期を行います。祝日は`src/storage/holiday-calendar.ts`、公園は`src/storage/park-options.ts`を編集します。同期完了までリクエストを受け付けず、失敗時は起動しません。事前実行には`npm run storage -- prepare`を使います。公式一覧との照合コマンドは読み取り専用です。

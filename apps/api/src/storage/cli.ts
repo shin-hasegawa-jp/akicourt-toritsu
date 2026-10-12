@@ -3,23 +3,29 @@ import { Store } from './store'
 import { japanToday, scopes } from './scopes'
 import { work } from './worker'
 import { registerHolidays } from './holidays'
+import { prepareStorage } from './sync-reference-data'
 import { checkParkCatalog } from './park-catalog'
 
 async function main(): Promise<void> {
   const [command, ...args] = process.argv.slice(2)
   if (
-    !['migrate', 'holidays', 'enqueue', 'worker', 'reset-block', 'check-parks'].includes(
+    !['prepare', 'migrate', 'holidays', 'enqueue', 'worker', 'reset-block', 'check-parks'].includes(
       command || '',
     )
   )
     throw new Error(
-      'Usage: storage migrate | holidays YEAR [YEAR] | enqueue PARK:grass|hard [PARK:grass|hard] [--from YYYY-MM-DD --to YYYY-MM-DD] | worker [--once] | reset-block | check-parks',
+      'Usage: storage prepare | migrate | holidays YEAR [YEAR] | enqueue PARK:grass|hard [PARK:grass|hard] [--from YYYY-MM-DD --to YYYY-MM-DD] | worker [--once] | reset-block | check-parks',
     )
   const pool = database()
   // Do not print pg errors containing connection details.
   pool.on('error', () => console.error('database-unavailable'))
   const store = new Store(pool)
   try {
+    if (command === 'prepare') {
+      if (args.length) throw new Error('invalid-arguments')
+      await prepareStorage(pool)
+      console.log('Migrations and reference data synchronized')
+    }
     if (command === 'check-parks') {
       if (args.length) throw new Error('invalid-arguments')
       console.log(JSON.stringify(await checkParkCatalog(store), null, 2))
