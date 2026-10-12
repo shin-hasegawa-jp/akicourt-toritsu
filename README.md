@@ -28,10 +28,9 @@ docker compose -f compose.dev.yaml down
 
 DBを使う場合は`.env`に生成した16進数の`POSTGRES_PASSWORD`を設定し、`-f compose.db.yaml`を追加する。DBはホスト非公開。ホストNodeから接続する場合だけ`-f compose.db-host.yaml`も追加し、`DB_PORT`（既定17592）を指定する。DB付き環境の停止にも同じ`-f`指定を使う。
 
-DB起動後、以下でスキーマ作成・更新要求・独立ワーカー起動を行う。更新は既定で日本時間の本日から7日間。ワーカーの起動後は公式へ通信するため、意図した時だけ起動する。
+DB付きAPIは起動時にスキーマ更新と祝日・公園マスターの同期を行う。同期が失敗した場合は起動しない。以下で更新要求・独立ワーカー起動を行う。更新は既定で日本時間の本日から7日間。ワーカーの起動後は公式へ通信するため、意図した時だけ起動する。
 
 ```sh
-docker compose -f compose.dev.yaml -f compose.db.yaml exec -T api npm run storage -- migrate
 docker compose -f compose.dev.yaml -f compose.db.yaml exec -T api npm run storage -- enqueue 1280:grass
 docker compose -f compose.dev.yaml -f compose.db.yaml --profile acquisition up -d --build worker
 # 停止（API・DBは維持）
@@ -86,3 +85,11 @@ curl -sS http://127.0.0.1:17590/api/availability/search -H 'Content-Type: applic
 期間以外の検索条件は変更時にブラウザ内へ自動保存する。画面を開くと期間は常に日本時間の本日から7日間（終了日は6日後）になる。公園は名前検索付きの選択画面で最大5対象を指定する。時間帯は開始時刻を複数選択でき、選択なしは時間指定なし。開始時刻の絞り込みは、検索APIが返す検証済みの保存枠に対して画面側で行う（取得範囲は変更しない）。終了時刻は公園・季節により異なるため、取得値をそのまま表示する。公式サイトへは画面上部の共通リンクから別タブで移動する。検索条件の引き継ぎや枠のコピーは行わず、予約操作は公式側で行う。
 
 機能開発はdevelopからfeatureブランチを作り、develop向けPRでレビューする。定期取得・本番公開は未実装。公式の「空き」「予約あり」「受付期間外」「保守日」に対応し、未知の状態は取得失敗とする。選択肢の照合と全対象の実取得確認は別であり、全公園・全状態と、公式の検索可能日の最遠上限は未確認。
+
+## デプロイ時のマスターデータ同期
+
+`DATABASE_URL`を設定したAPIは、リクエスト受付前にマイグレーションとコード内の祝日・公園データのDB同期を行う。APIの再起動時にも実行する。事前に明示実行する場合は`apps/api`で`npm run storage -- prepare`を使う。実行時には`migrations`ディレクトリをAPIとともに配置する。
+
+祝日の管理元は`apps/api/src/storage/holiday-calendar.ts`、公園は`apps/api/src/storage/park-options.ts`。祝日は同梱年・日付・名称・完了記録をコードに合わせて置き換える（コードから外した年も削除する）。公園は追加・名称変更・再有効化を反映し、コードから外した公園は無効化して取得履歴を保持する。画面の選択肢を変更する場合は`apps/web/src/availability/parks.ts`も更新する。過去のSQLマイグレーションは編集しない。
+
+両マスターの更新は同一トランザクションで行い、失敗時は両方を元に戻す。同時実行は直列化し、公式への外部通信は行わない。異なるコード版の同時起動では後から同期した版が反映されるため、デプロイ時は古い版の再起動を避ける。

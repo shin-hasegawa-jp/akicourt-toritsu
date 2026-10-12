@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { Pool } from 'pg'
+import { Pool, PoolClient } from 'pg'
 import calendar from './holiday-calendar'
 import { transaction } from './database'
 import { validateDate } from '../availability/parser'
@@ -82,21 +82,25 @@ export async function registerHolidays(
   // atomically; interruption or insertion failure leaves existing data intact.
   const selected = validateCalendar(data, years)
   await transaction(pool, async (client) => {
-    await client.query('SELECT pg_advisory_xact_lock(1759104)')
-    for (const entry of selected) {
-      await client.query('DELETE FROM holidays WHERE extract(year FROM use_date)::integer=$1', [
-        entry.year,
-      ])
-      for (const holiday of entry.holidays)
-        await client.query(
-          'INSERT INTO holidays(use_date,name,source,updated_at) VALUES($1,$2,$3,clock_timestamp())',
-          [holiday.date, holiday.name, HOLIDAY_SOURCE],
-        )
-      await client.query(
-        `INSERT INTO holiday_calendar_years(year,source) VALUES($1,$2)
-        ON CONFLICT(year) DO UPDATE SET source=excluded.source,updated_at=clock_timestamp()`,
-        [entry.year, HOLIDAY_SOURCE],
-      )
-    }
+    await writeHolidays(client, selected)
   })
+}
+
+export async function writeHolidays(client: PoolClient, selected: Year[]): Promise<void> {
+  await client.query('SELECT pg_advisory_xact_lock(1759104)')
+  for (const entry of selected) {
+    await client.query('DELETE FROM holidays WHERE extract(year FROM use_date)::integer=$1', [
+      entry.year,
+    ])
+    for (const holiday of entry.holidays)
+      await client.query(
+        'INSERT INTO holidays(use_date,name,source,updated_at) VALUES($1,$2,$3,clock_timestamp())',
+        [holiday.date, holiday.name, HOLIDAY_SOURCE],
+      )
+    await client.query(
+      `INSERT INTO holiday_calendar_years(year,source) VALUES($1,$2)
+      ON CONFLICT(year) DO UPDATE SET source=excluded.source,updated_at=clock_timestamp()`,
+      [entry.year, HOLIDAY_SOURCE],
+    )
+  }
 }
