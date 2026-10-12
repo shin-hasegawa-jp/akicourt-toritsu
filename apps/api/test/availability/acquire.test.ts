@@ -3,11 +3,7 @@ import * as assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { acquire, AcquisitionSession, Target } from '../../src/availability/client'
-import {
-  parseFacilities,
-  parseWeek,
-  validateDate
-} from '../../src/availability/parser'
+import { parseFacilities, parseWeek, validateDate } from '../../src/availability/parser'
 
 // Fixtures: anonymous public weekly JSON captured on 2026-10-10; no cookies or credentials.
 const fixture = (name = 'grass-11'): string =>
@@ -15,14 +11,14 @@ const fixture = (name = 'grass-11'): string =>
 const wire = (data: unknown): Response =>
   new Response(
     JSON.stringify(data).replace(
-      /[^\x00-\x7f]/g,
-      (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`
-    )
+      /[\u0080-\uffff]/g,
+      (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`,
+    ),
   )
 const target: Target = {
   parkId: '1280',
   surface: 'grass',
-  startDate: '2026-10-10'
+  startDate: '2026-10-10',
 }
 const html =
   '<input name="displayNo" value="prwrc2000"><input name="selectBldCd" value="1280"><select id="facility-select"><option value="0">choose</option><option value="12800020_3">Tennis</option></select>'
@@ -36,7 +32,7 @@ test('saved responses preserve dates, times and court counts', () => {
     date: '2026-10-13',
     start: '09:00',
     end: '11:00',
-    availableCourts: 4
+    availableCourts: 4,
   })
   assert.equal(parseWeek(fixture('hard'), target.startDate).checkedCells, 42)
 })
@@ -46,7 +42,12 @@ test('maintenance cells preserve the available slots in the rest of the official
   const week = parseWeek(JSON.stringify(data), '2026-10-19')
   assert.equal(week.checkedCells, 49)
   assert.equal(week.slots.length, 5)
-  assert.deepEqual(week.slots[0], { date: '2026-10-19', start: '09:00', end: '11:00', availableCourts: 5 })
+  assert.deepEqual(week.slots[0], {
+    date: '2026-10-19',
+    start: '09:00',
+    end: '11:00',
+    availableCourts: 5,
+  })
   assert.ok(week.slots.every((slot) => slot.start !== '07:00'))
   for (const change of [{ alt: '空き' }, { rsvNum: 1 }, { status: '1' }, { status: 2 }]) {
     const bad = structuredClone(data)
@@ -75,15 +76,23 @@ test('closed days preserve other slots and require an exact label and zero court
     Object.assign(row.timeResult[0], { status: 2, alt: '休館日', rsvNum: 0 })
   const week = parseWeek(JSON.stringify(data), target.startDate)
   assert.equal(week.checkedCells, expected.checkedCells)
-  assert.deepEqual(week.slots, expected.slots.filter((slot) => slot.date !== target.startDate))
-  for (const change of [{ alt: '空き' }, { alt: '保守日' }, { rsvNum: 1 }, { status: '2' }, { status: 3 }]) {
+  assert.deepEqual(
+    week.slots,
+    expected.slots.filter((slot) => slot.date !== target.startDate),
+  )
+  for (const change of [
+    { alt: '空き' },
+    { alt: '保守日' },
+    { rsvNum: 1 },
+    { status: '2' },
+    { status: 3 },
+  ]) {
     const bad = structuredClone(data)
     Object.assign(bad.result[0].timeResult[0], change)
     assert.throws(() => parseWeek(JSON.stringify(bad), target.startDate))
   }
   for (const row of data.result)
-    for (const cell of row.timeResult)
-      Object.assign(cell, { status: 2, alt: '休館日', rsvNum: 0 })
+    for (const cell of row.timeResult) Object.assign(cell, { status: 2, alt: '休館日', rsvNum: 0 })
   assert.deepEqual(parseWeek(JSON.stringify(data), target.startDate).slots, [])
   data.result[0].timeResult.pop()
   assert.throws(() => parseWeek(JSON.stringify(data), target.startDate))
@@ -95,13 +104,13 @@ test('elapsed dates outside reception do not invalidate a complete canonical wee
   assert.equal(week.checkedCells, 28)
   assert.deepEqual(
     week.days,
-    Array.from({ length: 7 }, (_, i) => `2026-10-${String(i + 5).padStart(2, '0')}`)
+    Array.from({ length: 7 }, (_, i) => `2026-10-${String(i + 5).padStart(2, '0')}`),
   )
   assert.deepEqual(week.slots, [])
   // A synthetic available current-day cell must still be emitted among elapsed days.
   Object.assign(data.result[0].timeResult[5], { status: 0, alt: '空き', rsvNum: 2 })
   assert.deepEqual(parseWeek(JSON.stringify(data), '2026-10-05').slots, [
-    { date: '2026-10-10', start: '09:00', end: '11:00', availableCourts: 2 }
+    { date: '2026-10-10', start: '09:00', end: '11:00', availableCourts: 2 },
   ])
 })
 
@@ -135,10 +144,9 @@ test('HTML, official errors, unknown statuses, duplicates and wrong dates fail',
 })
 
 test('HTML requires matching screen and park; hidden no-results text is harmless', () => {
-  assert.deepEqual(
-    parseFacilities(html + '<div>空き施設が見つかりませんでした</div>', '1280'),
-    [{ id: '12800020', name: 'Tennis' }]
-  )
+  assert.deepEqual(parseFacilities(html + '<div>空き施設が見つかりませんでした</div>', '1280'), [
+    { id: '12800020', name: 'Tennis' },
+  ])
   assert.throws(() => parseFacilities(html, '1310'))
   assert.throws(() => parseFacilities('<html>Error</html>', '1280'))
 })
@@ -149,12 +157,9 @@ test('retain session cookies, send documented fields, and do not log cookies', a
     call++
     if (call === 1)
       return new Response('pawab2000', {
-        headers: { 'set-cookie': 'session=fake-test-only; Path=/web/; Secure' }
+        headers: { 'set-cookie': 'session=fake-test-only; Path=/web/; Secure' },
       })
-    assert.match(
-      new Headers(init?.headers).get('cookie') || '',
-      /session=fake-test-only/
-    )
+    assert.match(new Headers(init?.headers).get('cookie') || '', /session=fake-test-only/)
     assert.equal(init?.redirect, 'manual')
     if (call === 2) return new Response(html)
     assert.match(String(init?.body), /transVacantMode=11/)
@@ -202,25 +207,22 @@ test('timeout includes response body and retries are bounded', async () => {
     Object.defineProperty(response, 'arrayBuffer', {
       value: async () =>
         await new Promise<ArrayBuffer>((_resolve, reject) => {
-          init?.signal?.addEventListener(
-            'abort',
-            () => reject(new Error('aborted')),
-            { once: true }
-          )
-        })
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+            once: true,
+          })
+        }),
     })
     return response
   }
   const [result] = await acquire([target], {
     ...options,
     fetchImpl,
-    timeoutMs: 5
+    timeoutMs: 5,
   })
   assert.equal(result?.state, 'failed')
   if (result?.state === 'failed') assert.equal(result.error, 'timeout')
   assert.equal(calls, 2)
 })
-
 
 test('reusable session keeps cookies and facility IDs across jobs with per-job metrics', async () => {
   const session = new AcquisitionSession()
@@ -230,7 +232,10 @@ test('reusable session keeps cookies and facility IDs across jobs with per-job m
     const path = new URL(String(url)).pathname
     paths.push(path)
     const fields = new URLSearchParams(String(init?.body || ''))
-    if (path === '/web/') return new Response('pawab2000', { headers: { 'set-cookie': 'session=test; Path=/web/; Secure' } })
+    if (path === '/web/')
+      return new Response('pawab2000', {
+        headers: { 'set-cookie': 'session=test; Path=/web/; Secure' },
+      })
     assert.match(new Headers(init?.headers).get('cookie') || '', /session=test/)
     assert.ok(!path.includes('Favorite2'))
     if (path.endsWith('InstSrchVacantAction.do')) {
@@ -251,15 +256,25 @@ test('reusable session keeps cookies and facility IDs across jobs with per-job m
   assert.equal(first?.state, 'success')
   assert.equal(next?.state, 'success')
   assert.equal(other?.state, 'success')
-  assert.deepEqual([first?.requests.length, next?.requests.length, other?.requests.length], [3, 1, 2])
-  assert.equal(paths.filter(p => p === '/web/').length, 1)
+  assert.deepEqual(
+    [first?.requests.length, next?.requests.length, other?.requests.length],
+    [3, 1, 2],
+  )
+  assert.equal(paths.filter((p) => p === '/web/').length, 1)
   assert.equal(paths.length, 6)
 })
 
 test('failed initialization is throttled; acquisition errors do not imply session expiry', async () => {
   const session = new AcquisitionSession()
   let calls = 0
-  const opts = { ...options, session, fetchImpl: async () => { calls++; return new Response('<html>unavailable</html>') } }
+  const opts = {
+    ...options,
+    session,
+    fetchImpl: async () => {
+      calls++
+      return new Response('<html>unavailable</html>')
+    },
+  }
   assert.equal((await acquire([target], opts))[0]?.state, 'failed')
   assert.equal((await acquire([target], opts))[0]?.requests.length, 0)
   assert.equal(calls, 1)
@@ -269,7 +284,10 @@ test('failed initialization is throttled; acquisition errors do not imply sessio
   session.initialized = true
   session.initializationRetryAt = 0
   session.prepared.add('1280/grass')
-  session.targets.set('1280/grass', { parkName: 'Test', facilities: [{ id: '12800020', name: 'Grass' }] })
+  session.targets.set('1280/grass', {
+    parkName: 'Test',
+    facilities: [{ id: '12800020', name: 'Grass' }],
+  })
   const [result] = await acquire([target], opts)
   assert.equal(result?.state, 'failed')
   assert.equal(result?.requests.length, 1)
@@ -284,8 +302,19 @@ test('outside-hours placeholders preserve the rest of the week and reject contra
   Object.assign(removed, { status: 600, alt: '時間外', startTime: -1, endTime: -1, rsvNum: 0 })
   const week = parseWeek(JSON.stringify(data), target.startDate)
   assert.equal(week.checkedCells, original.checkedCells)
-  assert.deepEqual(week.slots, original.slots.filter(s => !(s.date === '2026-10-13' && s.start === '09:00')))
-  for (const change of [{ alt: '空き' }, { rsvNum: 1 }, { selectNum: 1 }, { startTime: 900 }, { endTime: 1100 }, { status: '600' }, { useDay: 20261101 }]) {
+  assert.deepEqual(
+    week.slots,
+    original.slots.filter((s) => !(s.date === '2026-10-13' && s.start === '09:00')),
+  )
+  for (const change of [
+    { alt: '空き' },
+    { rsvNum: 1 },
+    { selectNum: 1 },
+    { startTime: 900 },
+    { endTime: 1100 },
+    { status: '600' },
+    { useDay: 20261101 },
+  ]) {
     const bad = structuredClone(data)
     Object.assign(bad.result[0].timeResult[3], change)
     assert.throws(() => parseWeek(JSON.stringify(bad), target.startDate))
@@ -294,8 +323,13 @@ test('outside-hours placeholders preserve the rest of the week and reject contra
   assert.throws(() => parseWeek(JSON.stringify(data), target.startDate))
 })
 
-
-const expiredPage = () => new Response(Buffer.from('PGh0bWw+PGJvZHk+g1qDYoNWg4eDk4Neg0ODgINBg0WDZ4KqlK2QtoK1gtyCtYK9gUIgjcSTeIFBlEaP2ILwjXOCwYLEibqCs4KigUI8L2JvZHk+PC9odG1sPg==', 'base64'))
+const expiredPage = () =>
+  new Response(
+    Buffer.from(
+      'PGh0bWw+PGJvZHk+g1qDYoNWg4eDk4Neg0ODgINBg0WDZ4KqlK2QtoK1gtyCtYK9gUIgjcSTeIFBlEaP2ILwjXOCwYLEibqCs4KigUI8L2JvZHk+PC9odG1sPg==',
+      'base64',
+    ),
+  )
 const readySession = (parkId = '1280', surface: 'grass' | 'hard' = 'grass') => {
   const state = new AcquisitionSession()
   state.initialized = true
@@ -310,22 +344,34 @@ test('explicit session expiry recovers through home and facilities once, without
     const state = readySession('1280', surface)
     const paths: string[] = []
     const progress: number[] = []
-    const [result] = await acquire([{ ...target, surface }], { ...options, session: state,
-      onProgress: async count => { progress.push(count) },
+    const [result] = await acquire([{ ...target, surface }], {
+      ...options,
+      session: state,
+      onProgress: async (count) => {
+        progress.push(count)
+      },
       fetchImpl: async (url, init) => {
         const path = new URL(String(url)).pathname
         paths.push(path)
         if (paths.length === 1) return expiredPage()
         if (path === '/web/') return new Response('pawab2000')
         if (path.endsWith('InstSrchVacantAction.do')) {
-          assert.equal(new URLSearchParams(String(init?.body)).get('selectPpsCd'), surface === 'grass' ? '1030' : '1020')
+          assert.equal(
+            new URLSearchParams(String(init?.body)).get('selectPpsCd'),
+            surface === 'grass' ? '1030' : '1020',
+          )
           return new Response(html)
         }
         return wire(JSON.parse(fixture()))
-      }
+      },
     })
     assert.equal(result?.state, 'success')
-    assert.deepEqual(paths, ['/web/rsvWOpeInstSrchVacantAjaxAction.do', '/web/', '/web/rsvWOpeInstSrchVacantAction.do', '/web/rsvWOpeInstSrchVacantAjaxAction.do'])
+    assert.deepEqual(paths, [
+      '/web/rsvWOpeInstSrchVacantAjaxAction.do',
+      '/web/',
+      '/web/rsvWOpeInstSrchVacantAction.do',
+      '/web/rsvWOpeInstSrchVacantAjaxAction.do',
+    ])
     assert.deepEqual(progress, [1, 2, 3, 4])
     assert.equal(result?.requests.length, 4)
   }
@@ -335,13 +381,19 @@ test('recovery failure waits and repeated expiry is bounded', async () => {
   for (const failure of ['home', 'facilities', 'week']) {
     const state = readySession()
     let calls = 0
-    const opts = { ...options, session: state, fetchImpl: async (url: string | URL | Request) => {
-      calls++
-      const path = new URL(String(url)).pathname
-      if (calls === 1 || failure === 'week' && path.endsWith('InstSrchVacantAjaxAction.do')) return expiredPage()
-      if (path === '/web/') return new Response(failure === 'home' ? '<html>unavailable</html>' : 'pawab2000')
-      return new Response(failure === 'facilities' ? '<html>unavailable</html>' : html)
-    } }
+    const opts = {
+      ...options,
+      session: state,
+      fetchImpl: async (url: string | URL | Request) => {
+        calls++
+        const path = new URL(String(url)).pathname
+        if (calls === 1 || (failure === 'week' && path.endsWith('InstSrchVacantAjaxAction.do')))
+          return expiredPage()
+        if (path === '/web/')
+          return new Response(failure === 'home' ? '<html>unavailable</html>' : 'pawab2000')
+        return new Response(failure === 'facilities' ? '<html>unavailable</html>' : html)
+      },
+    }
     assert.equal((await acquire([target], opts))[0]?.state, 'failed')
     const previous = calls
     assert.equal((await acquire([target], opts))[0]?.requests.length, 0)
@@ -352,8 +404,15 @@ test('recovery failure waits and repeated expiry is bounded', async () => {
 })
 
 test('generic HTML and official errors do not trigger session recovery', async () => {
-  for (const response of [() => new Response('<html>Currently unavailable</html>'), () => wire({ ErrManager: { message: 'error' } })]) {
-    const [result] = await acquire([target], { ...options, session: readySession(), fetchImpl: async () => response() })
+  for (const response of [
+    () => new Response('<html>Currently unavailable</html>'),
+    () => wire({ ErrManager: { message: 'error' } }),
+  ]) {
+    const [result] = await acquire([target], {
+      ...options,
+      session: readySession(),
+      fetchImpl: async () => response(),
+    })
     assert.equal(result?.state, 'failed')
     assert.equal(result?.requests.length, 1)
   }

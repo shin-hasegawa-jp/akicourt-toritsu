@@ -9,7 +9,7 @@ import { AvailabilityService } from '../src/availability-api/service'
 import { Store } from '../src/storage/store'
 import { work } from '../src/storage/worker'
 
-void test(
+test(
   'new Ariake target with maintenance response acquires, saves and searches in isolated DB',
   { skip: !process.env.DATABASE_URL },
   async () => {
@@ -33,7 +33,7 @@ void test(
       const wire = (text: string) =>
         new Response(
           text.replace(
-            /[^\x00-\x7f]/g,
+            /[\u0080-\uffff]/g,
             (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`,
           ),
         )
@@ -77,7 +77,7 @@ void test(
   },
 )
 
-void test(
+test(
   'official park catalog migration enables all pairs and existing DB history is retained',
   { skip: !process.env.DATABASE_URL },
   async () => {

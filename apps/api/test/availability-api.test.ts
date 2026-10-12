@@ -10,7 +10,7 @@ import { japanToday } from '../src/storage/scopes'
 import { offsetDate } from '../src/availability/parser'
 import { Result } from '../src/availability/client'
 
-void test('API schemas reject invalid input; missing storage returns safe 503', async () => {
+test('API schemas reject invalid input; missing storage returns safe 503', async () => {
   const app = Fastify()
   const previous = process.env.DATABASE_URL
   delete process.env.DATABASE_URL
@@ -35,9 +35,15 @@ void test('API schemas reject invalid input; missing storage returns safe 503', 
       assert.equal(response.statusCode, 400, response.body)
       assert.equal(response.json().error.code, 'invalid_request')
     }
-    const targets = Array.from({ length: 5 }, (_, i) => ({ parkId: String(1000 + i), surface: 'grass' }))
+    const targets = Array.from({ length: 5 }, (_, i) => ({
+      parkId: String(1000 + i),
+      surface: 'grass',
+    }))
     assert.equal((await request({ targets })).statusCode, 503)
-    assert.equal((await request({ targets: [...targets, { parkId: '1005', surface: 'grass' }] })).statusCode, 400)
+    assert.equal(
+      (await request({ targets: [...targets, { parkId: '1005', surface: 'grass' }] })).statusCode,
+      400,
+    )
     assert.equal(
       (await request({ targets: [{ parkId: '1280', surface: 'grass' }] })).statusCode,
       503,
@@ -48,7 +54,7 @@ void test('API schemas reject invalid input; missing storage returns safe 503', 
     if (previous !== undefined) process.env.DATABASE_URL = previous
   }
 })
-void test(
+test(
   'API search/update contracts against isolated PostgreSQL, without official HTTP',
   { skip: !process.env.DATABASE_URL },
   async () => {

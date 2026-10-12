@@ -4,7 +4,8 @@ import { acquireParkCatalog } from '../src/availability/client'
 import { compareParkCatalog, checkParkCatalog } from '../src/storage/park-catalog'
 import { Store } from '../src/storage/store'
 
-const wire = (rows: unknown[], all = rows.length) => new Response(JSON.stringify({ all, results: rows }))
+const wire = (rows: unknown[], all = rows.length) =>
+  new Response(JSON.stringify({ all, results: rows }))
 const options = { sleep: async () => {}, intervalMs: 0 }
 
 test('catalog comparison reports additions, missing pairs, renames and disabled listings', () => {
@@ -30,25 +31,47 @@ test('catalog comparison reports additions, missing pairs, renames and disabled 
 test('manual catalog fetch uses a separate session and exactly home plus two surface lists', async () => {
   const paths: string[] = []
   const purposes: string[] = []
-  const result = await acquireParkCatalog({ ...options, fetchImpl: async (url, init) => {
-    paths.push(new URL(String(url)).pathname)
-    if (paths.length === 1) return new Response('pawab2000', { headers: { 'set-cookie': 'session=catalog; Path=/web/; Secure' } })
-    assert.match(new Headers(init?.headers).get('cookie') || '', /session=catalog/)
-    purposes.push(new URLSearchParams(String(init?.body)).get('selectPpsCd')!)
-    return wire([{ bcd: '1000', bcdNm: 'Park' }])
-  } })
+  const result = await acquireParkCatalog({
+    ...options,
+    fetchImpl: async (url, init) => {
+      paths.push(new URL(String(url)).pathname)
+      if (paths.length === 1)
+        return new Response('pawab2000', {
+          headers: { 'set-cookie': 'session=catalog; Path=/web/; Secure' },
+        })
+      assert.match(new Headers(init?.headers).get('cookie') || '', /session=catalog/)
+      purposes.push(new URLSearchParams(String(init?.body)).get('selectPpsCd')!)
+      return wire([{ bcd: '1000', bcdNm: 'Park' }])
+    },
+  })
   assert.deepEqual(purposes, ['1030', '1020'])
   assert.equal(paths.length, 3)
-  assert.ok(paths.slice(1).every(p => p.includes('Favorite2')))
-  assert.deepEqual(result.map(row => row.surface), ['grass', 'hard'])
+  assert.ok(paths.slice(1).every((p) => p.includes('Favorite2')))
+  assert.deepEqual(
+    result.map((row) => row.surface),
+    ['grass', 'hard'],
+  )
 })
 
 test('malformed or unavailable official catalog fails rather than reporting removals', async () => {
-  for (const response of [() => wire([]), () => wire([{ bcd: '1000', bcdNm: 'Park' }], 2),
-    () => wire([{ bcd: '1000', bcdNm: 'A' }, { bcd: '1000', bcdNm: 'B' }]),
-    () => new Response('<html>unavailable</html>'), () => new Response('blocked', { status: 429 })]) {
+  for (const response of [
+    () => wire([]),
+    () => wire([{ bcd: '1000', bcdNm: 'Park' }], 2),
+    () =>
+      wire([
+        { bcd: '1000', bcdNm: 'A' },
+        { bcd: '1000', bcdNm: 'B' },
+      ]),
+    () => new Response('<html>unavailable</html>'),
+    () => new Response('blocked', { status: 429 }),
+  ]) {
     let count = 0
-    await assert.rejects(acquireParkCatalog({ ...options, fetchImpl: async () => ++count === 1 ? new Response('pawab2000') : response() }))
+    await assert.rejects(
+      acquireParkCatalog({
+        ...options,
+        fetchImpl: async () => (++count === 1 ? new Response('pawab2000') : response()),
+      }),
+    )
     assert.equal(count, 2)
   }
 })
@@ -58,11 +81,29 @@ test('check refuses concurrent worker ownership and releases its lease on failed
   let requests = 0
   const unavailable = { takeLease: async () => false } as unknown as Store
   await assert.rejects(checkParkCatalog(unavailable), /worker-unavailable/)
-  const store = { takeLease: async () => true, release: async () => { releases++ },
-    beforeRequest: async () => 0, heartbeat: async () => {},
-    pool: { query: async (sql: string) => { assert.match(sql, /^SELECT/); return { rows: [] } } }
+  const store = {
+    takeLease: async () => true,
+    release: async () => {
+      releases++
+    },
+    beforeRequest: async () => 0,
+    heartbeat: async () => {},
+    pool: {
+      query: async (sql: string) => {
+        assert.match(sql, /^SELECT/)
+        return { rows: [] }
+      },
+    },
   } as unknown as Store
-  await assert.rejects(checkParkCatalog(store, { ...options, fetchImpl: async () => { requests++; return new Response('unavailable') } }))
+  await assert.rejects(
+    checkParkCatalog(store, {
+      ...options,
+      fetchImpl: async () => {
+        requests++
+        return new Response('unavailable')
+      },
+    }),
+  )
   assert.equal(requests, 1)
   assert.equal(releases, 1)
 })

@@ -7,7 +7,11 @@ import { checkParkCatalog } from './park-catalog'
 
 async function main(): Promise<void> {
   const [command, ...args] = process.argv.slice(2)
-  if (!['migrate', 'holidays', 'enqueue', 'worker', 'reset-block', 'check-parks'].includes(command || ''))
+  if (
+    !['migrate', 'holidays', 'enqueue', 'worker', 'reset-block', 'check-parks'].includes(
+      command || '',
+    )
+  )
     throw new Error(
       'Usage: storage migrate | holidays YEAR [YEAR] | enqueue PARK:grass|hard [PARK:grass|hard] [--from YYYY-MM-DD --to YYYY-MM-DD] | worker [--once] | reset-block | check-parks',
     )
