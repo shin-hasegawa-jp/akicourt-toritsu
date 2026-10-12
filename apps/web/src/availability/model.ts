@@ -1,4 +1,5 @@
 import * as v from 'valibot'
+import { defaultTarget } from './parks'
 import { ConditionsSchema, type Conditions } from './schemas'
 export { parks, parkGroups } from './parks'
 export type { Conditions, Scope, Slot, SearchResult } from './schemas'
@@ -19,7 +20,7 @@ export function offset(date: string, days: number): string {
 export function defaults(): Conditions {
   const dateFrom = today()
   return {
-    targets: ['1280:grass'],
+    targets: defaultTarget.value ? [defaultTarget.value] : [],
     dateFrom,
     dateTo: offset(dateFrom, 6),
     weekdays: [0, 1, 2, 3, 4, 5, 6],

@@ -13,3 +13,5 @@ Fastify + TypeScript。`GET /health`で疎通確認。起動・ポート指定�
 CIではformat・lint・型チェック・テストを実行し、ファイルの自動修正は行いません。
 
 `DATABASE_URL`を設定したAPIは起動時にマイグレーションと祝日・公園マスターの同期を行います。祝日は`src/storage/holiday-calendar.ts`、公園は`src/storage/park-options.ts`を編集します。同期完了までリクエストを受け付けず、失敗時は起動しません。事前実行には`npm run storage -- prepare`を使います。公式一覧との照合コマンドは読み取り専用です。
+
+`GET /api/availability/parks` はコード内の公園カタログから、種目別の表示順・名称・初期選択を返します。Webはこの一覧を使用し、公園定義を持ちません。DB接続なしでも一覧を返し、公式への通信は行いません。

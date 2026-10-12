@@ -90,6 +90,6 @@ curl -sS http://127.0.0.1:17590/api/availability/search -H 'Content-Type: applic
 
 `DATABASE_URL`を設定したAPIは、リクエスト受付前にマイグレーションとコード内の祝日・公園データのDB同期を行う。APIの再起動時にも実行する。事前に明示実行する場合は`apps/api`で`npm run storage -- prepare`を使う。実行時には`migrations`ディレクトリをAPIとともに配置する。
 
-祝日の管理元は`apps/api/src/storage/holiday-calendar.ts`、公園は`apps/api/src/storage/park-options.ts`。祝日は同梱年・日付・名称・完了記録をコードに合わせて置き換える（コードから外した年も削除する）。公園は追加・名称変更・再有効化を反映し、コードから外した公園は無効化して取得履歴を保持する。画面の選択肢を変更する場合は`apps/web/src/availability/parks.ts`も更新する。過去のSQLマイグレーションは編集しない。
+祝日の管理元は`apps/api/src/storage/holiday-calendar.ts`、公園は`apps/api/src/storage/park-options.ts`。祝日は同梱年・日付・名称・完了記録をコードに合わせて置き換える（コードから外した年も削除する）。公園は追加・名称変更・再有効化を反映し、コードから外した公園は無効化して取得履歴を保持する。画面の選択肢は`GET /api/availability/parks`から取得し、APIのカタログ順に表示する。公園の追加・名称変更はAPIのカタログだけを更新する。過去のSQLマイグレーションは編集しない。
 
 両マスターの更新は同一トランザクションで行い、失敗時は両方を元に戻す。同時実行は直列化し、公式への外部通信は行わない。異なるコード版の同時起動では後から同期した版が反映されるため、デプロイ時は古い版の再起動を避ける。
