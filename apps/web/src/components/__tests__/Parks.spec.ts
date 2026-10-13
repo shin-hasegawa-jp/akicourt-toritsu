@@ -9,8 +9,8 @@ import official from './fixtures/official-parks.json'
 afterEach(() => vi.unstubAllGlobals())
 describe('official tennis park choices', () => {
   it('matches the complete official lists and their order by surface', () => {
-    expect(parkGroups.map((group) => group.surface)).toEqual(['hard', 'grass'])
-    for (const group of parkGroups)
+    expect(parkGroups.value.map((group) => group.surface)).toEqual(['hard', 'grass'])
+    for (const group of parkGroups.value)
       expect(group.parks.map((park) => ({ id: park.parkId, name: park.parkName }))).toEqual(
         official[group.surface],
       )

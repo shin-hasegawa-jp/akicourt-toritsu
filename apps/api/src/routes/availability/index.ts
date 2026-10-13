@@ -1,5 +1,6 @@
 import { FastifyPluginAsync } from 'fastify'
 import { Pool } from 'pg'
+import parks from '../../storage/park-options'
 import { database } from '../../storage/database'
 import { AvailabilityService } from '../../availability-api/service'
 import {
@@ -40,6 +41,22 @@ const routes: FastifyPluginAsync<{ pool?: Pool }> = async (app, opts) => {
     reply.code(safe.status).send({ error: { code: safe.code, message: safe.message } })
   })
   const errors = { 400: errorSchema, 404: errorSchema, 503: errorSchema }
+  app.get('/parks', async () => ({
+    defaultTarget: parks.some((park) => park.parkId === '1280' && park.surface === 'grass')
+      ? '1280:grass'
+      : `${parks[0].parkId}:${parks[0].surface}`,
+    groups: (['hard', 'grass'] as const).map((surface) => ({
+      surface,
+      label: surface === 'hard' ? 'ハード' : '人工芝',
+      parks: parks
+        .filter((park) => park.surface === surface)
+        .map((park) => ({
+          parkId: park.parkId,
+          parkName: park.name,
+        })),
+    })),
+  }))
+
   // Fastify's default AJV removes additional fields. Reject them before validation
   // so a misspelled date/filter cannot silently broaden a search or update.
   const rejectUnknown = (properties: object) => async (request: { body: unknown }) => {

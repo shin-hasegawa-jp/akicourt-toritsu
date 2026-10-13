@@ -1,5 +1,6 @@
 import { parks, type Conditions, type SearchResult } from './model'
 import * as v from 'valibot'
+import { setParkCatalog } from './parks'
 import { ErrorSchema, SearchSchema, UpdatesSchema, JobSchema, type Job } from './schemas'
 export type { Job } from './schemas'
 export class RequestError extends Error {}
@@ -97,4 +98,14 @@ export async function job(id: string, signal: AbortSignal): Promise<Job> {
   if (!parsed.success || parsed.output.jobId !== id)
     throw new RequestError('進捗の形式を確認できません。再確認してください。')
   return parsed.output
+}
+
+export async function loadParkCatalog(signal: AbortSignal): Promise<void> {
+  const data = await request('parks', signal)
+  signal.throwIfAborted()
+  try {
+    setParkCatalog(data)
+  } catch {
+    throw new RequestError('公園一覧の形式を確認できません。再試行してください。')
+  }
 }

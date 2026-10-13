@@ -82,9 +82,9 @@ const dateMessage = '開始日と終了日を含め、最大7日間の期間を�
 export const ConditionFieldsSchema = v.object({
   targets: v.pipe(
     v.array(
-      v.picklist(
-        parks.map((park) => park.key),
-        targetMessage,
+      v.pipe(
+        v.string(),
+        v.check((key) => parks.some((park) => park.key === key), targetMessage),
       ),
       targetMessage,
     ),

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { loadParkCatalog } from './availability/api'
 import { defaults, parks, weekdayNames, offset, type Conditions } from './availability/model'
 import { restoreConditions, saveConditions } from './availability/preferences'
 import { useAvailability } from './availability/useAvailability'
@@ -7,18 +8,51 @@ import ParkPicker from './components/ParkPicker.vue'
 
 const form = reactive(defaults())
 const preferenceMessage = ref('')
-try {
-  const saved = restoreConditions(localStorage)
-  Object.assign(form, saved.conditions)
-  preferenceMessage.value = saved.message
-  if (form.timeFrom !== '00:00' || form.timeTo !== '24:00') {
-    form.timeFrom = '00:00'
-    form.timeTo = '24:00'
-    preferenceMessage.value = '時間帯の選び方が変わりました。開始時刻を選び直してください。'
+const catalogReady = ref(parks.length > 0)
+const catalogLoading = ref(false)
+const catalogError = ref('')
+const catalogController = new AbortController()
+function restorePreferences() {
+  Object.assign(form, defaults())
+  try {
+    const saved = restoreConditions(localStorage)
+    Object.assign(form, saved.conditions)
+    preferenceMessage.value = saved.message
+    if (form.timeFrom !== '00:00' || form.timeTo !== '24:00') {
+      form.timeFrom = '00:00'
+      form.timeTo = '24:00'
+      preferenceMessage.value = '時間帯の選び方が変わりました。開始時刻を選び直してください。'
+    }
+  } catch {
+    preferenceMessage.value = 'ブラウザの条件保存を利用できません。検索は利用できます。'
   }
-} catch {
-  preferenceMessage.value = 'ブラウザの条件保存を利用できません。検索は利用できます。'
 }
+if (catalogReady.value) restorePreferences()
+async function loadParks() {
+  if (catalogLoading.value) return
+  catalogLoading.value = true
+  catalogError.value = ''
+  try {
+    await loadParkCatalog(catalogController.signal)
+    if (catalogController.signal.aborted) return
+    restorePreferences()
+    // Finish restoration before enabling automatic preference writes.
+    await nextTick()
+    if (catalogController.signal.aborted) return
+    catalogReady.value = true
+  } catch (error) {
+    if (!catalogController.signal.aborted)
+      catalogError.value =
+        error instanceof Error ? error.message : '公園一覧を取得できません。再試行してください。'
+  } finally {
+    catalogLoading.value = false
+  }
+}
+onMounted(() => {
+  if (!catalogReady.value) void loadParks()
+})
+onBeforeUnmount(() => catalogController.abort())
+
 watch(
   () => [
     form.targets,
@@ -28,6 +62,7 @@ watch(
     form.minDurationMinutes,
   ],
   () => {
+    if (!catalogReady.value) return
     try {
       preferenceMessage.value = saveConditions(localStorage, form)
     } catch {
@@ -116,6 +151,7 @@ function summary(input: Conditions, includeParks = true) {
   return `${includeParks ? `${names} / ` : ''}${days}${input.includeHolidays ? '・祝日' : ''} / ${time}`
 }
 async function search() {
+  if (!catalogReady.value) return
   if (!(await runSearch())) return
   await nextTick()
   if (error.value) errorElement.value?.focus()
@@ -195,6 +231,11 @@ function parkName(id: string): string {
             <dd>{{ summary(form, false) }}</dd>
           </div>
         </dl>
+        <p v-if="catalogLoading" class="hint" role="status">公園一覧を読み込んでいます。</p>
+        <div v-if="catalogError" role="alert">
+          <p class="error">{{ catalogError }}</p>
+          <button class="btn btn-outline" type="button" @click="loadParks">公園一覧を再取得</button>
+        </div>
         <p v-if="preferenceMessage" class="hint" role="status">{{ preferenceMessage }}</p>
         <form
           id="condition-form"
@@ -210,7 +251,12 @@ function parkName(id: string): string {
                 >{{ parkSummary }}</strong
               >
               <p class="hint">{{ form.targets.length }}対象を選択中</p>
-              <button class="btn btn-outline w-full" type="button" @click="picker?.open()">
+              <button
+                class="btn btn-outline w-full"
+                type="button"
+                :disabled="!catalogReady"
+                @click="picker?.open()"
+              >
                 公園を変更
               </button>
             </div>
@@ -332,7 +378,11 @@ function parkName(id: string): string {
           <p v-if="error" ref="errorElement" class="error" role="alert" tabindex="-1">
             {{ error }}
           </p>
-          <button class="btn btn-primary w-full search-button" type="submit">
+          <button
+            class="btn btn-primary w-full search-button"
+            type="submit"
+            :disabled="!catalogReady"
+          >
             {{ loading ? '再検索（検索中）' : '空きを探す' }}
           </button>
         </form>
