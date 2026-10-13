@@ -3,9 +3,10 @@ import { setTimeout as sleep } from 'node:timers/promises'
 import { acquireParkCatalog, CatalogPark, Options } from '../availability/client'
 import { AcquisitionError } from '../availability/parser'
 import { Store } from './store'
+import parks from './park-options'
 
 type LocalPark = CatalogPark & { enabled: boolean }
-export function compareParkCatalog(local: LocalPark[], official: CatalogPark[]) {
+export function compareParkCatalog(local: CatalogPark[], official: CatalogPark[]) {
   const key = (row: CatalogPark) => `${row.parkId}/${row.surface}`
   const known = new Map(local.map((row) => [key(row), row]))
   const current = new Map(official.map((row) => [key(row), row]))
@@ -14,11 +15,8 @@ export function compareParkCatalog(local: LocalPark[], official: CatalogPark[]) 
     missing: local.filter((row) => !current.has(key(row))),
     renamed: official.flatMap((row) => {
       const old = known.get(key(row))
-      return old && old.name !== row.name
-        ? [{ ...row, previousName: old.name, enabled: old.enabled }]
-        : []
+      return old && old.name !== row.name ? [{ ...row, previousName: old.name }] : []
     }),
-    disabledButListed: local.filter((row) => !row.enabled && current.has(key(row))),
   }
 }
 
@@ -42,11 +40,7 @@ export async function checkParkCatalog(store: Store, options: Options = {}) {
       })
   }, 20000)
   try {
-    const local = (
-      await store.pool.query(
-        'SELECT park_id AS "parkId",surface,name,enabled FROM park_surfaces ORDER BY park_id,surface',
-      )
-    ).rows as LocalPark[]
+    const local: CatalogPark[] = [...parks]
     const official = await acquireParkCatalog({
       ...options,
       signal,
@@ -61,7 +55,8 @@ export async function checkParkCatalog(store: Store, options: Options = {}) {
     })
     return {
       checkedAt: new Date().toISOString(),
-      localCount: local.length,
+      comparison: 'official-vs-code',
+      codeCount: local.length,
       officialCount: official.length,
       ...compareParkCatalog(local, official),
     }
@@ -75,5 +70,44 @@ export async function checkParkCatalog(store: Store, options: Options = {}) {
   } finally {
     clearInterval(timer)
     await store.release(owner)
+  }
+}
+
+export function compareParkStorage(code: CatalogPark[], stored: LocalPark[]) {
+  const key = (row: CatalogPark) => `${row.parkId}/${row.surface}`
+  const expected = new Map(code.map((row) => [key(row), row]))
+  const actual = new Map(stored.map((row) => [key(row), row]))
+  const missing = code.filter((row) => !actual.has(key(row)))
+  const renamed = code.flatMap((row) => {
+    const found = actual.get(key(row))
+    return found && found.name !== row.name ? [{ ...row, storedName: found.name }] : []
+  })
+  const disabled = code.filter((row) => actual.get(key(row))?.enabled === false)
+  const unexpectedEnabled = stored.filter((row) => row.enabled && !expected.has(key(row)))
+  const retainedDisabled = stored.filter((row) => !row.enabled && !expected.has(key(row)))
+  return {
+    synchronized:
+      !missing.length && !renamed.length && !disabled.length && !unexpectedEnabled.length,
+    missing,
+    renamed,
+    disabled,
+    unexpectedEnabled,
+    retainedDisabled,
+  }
+}
+
+// Read-only DB comparison: no official requests or acquisition lease needed.
+export async function checkParkStorage(store: Store) {
+  const stored = (
+    await store.pool.query(
+      'SELECT park_id AS "parkId",surface,name,enabled FROM park_surfaces ORDER BY park_id,surface',
+    )
+  ).rows as LocalPark[]
+  return {
+    checkedAt: new Date().toISOString(),
+    comparison: 'code-vs-db',
+    codeCount: parks.length,
+    storedCount: stored.length,
+    ...compareParkStorage([...parks], stored),
   }
 }
