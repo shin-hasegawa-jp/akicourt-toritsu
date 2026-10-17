@@ -50,7 +50,7 @@ docker compose -f compose.dev.yaml -f compose.firestore.yaml exec -T api node sc
 
 APIコンテナからは`firestore:8080`、ホストからは`127.0.0.1:17593`へ接続する。ホスト側ポートは`FIRESTORE_PORT`で変更できる。プロジェクトは`demo-akicourt-local`固定。エミュレータ再起動でデータは消える。現時点の検索・更新APIはPostgreSQL版のため、この構成ではSDK接続と公園/祝日・制御状態の初期投入を確認できる。通常のWeb/API起動ではエミュレータは不要。
 
-Firestoreの管理操作はAPIコンテナ内のコンパイル済みCLIを使う。書込みは既定dry-runで、`--apply`を付けた時だけ反映する。
+Firestoreの管理操作はAPIコンテナ内のコンパイル済みCLIを使う。書込みは既定dry-runで、`--apply`を付けた時だけ反映する。 `repair-outbox`は登録待ちのqueuedジョブを最大10件確認し、`--apply`で再登録する。本物のCloud Tasksへの登録は本番設定（`TASKS_LOCATION`・`TASKS_QUEUE`・`TASKS_CALLER_SA`・`WORKER_URL`）が必要で、ローカルではdry-runのみ。
 
 ```sh
 # 起動中のAPIコンテナで、まず変更内容を確認する
