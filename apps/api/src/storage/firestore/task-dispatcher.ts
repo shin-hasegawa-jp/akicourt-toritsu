@@ -43,7 +43,7 @@ export function taskRequest(config: TaskConfig, job: DispatchJob) {
         httpMethod: protos.google.cloud.tasks.v2.HttpMethod.POST,
         url: `${url.origin}/tasks/acquire`,
         headers: { 'Content-Type': 'application/json' },
-        body: Buffer.from(JSON.stringify(job)),
+        body: Buffer.from(JSON.stringify({ jobId: job.jobId, generation: job.generation })),
         oidcToken: { serviceAccountEmail: config.callerSA, audience: url.origin },
       },
     },
