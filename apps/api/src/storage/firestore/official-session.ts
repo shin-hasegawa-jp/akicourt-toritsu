@@ -1,3 +1,5 @@
+import { parseValue } from '../../validation'
+import { ControlSchema, SessionDocumentSchema } from './schemas'
 import { randomUUID } from 'node:crypto'
 import { Firestore, Timestamp } from '@google-cloud/firestore'
 import { AcquisitionSession, SessionCheckpoint } from '../../availability/client'
@@ -6,26 +8,20 @@ import { restoreSession, serializeSession } from '../../availability/session-sta
 import { limits, measureDocument } from './snapshot-codec'
 
 type Ownership = { owner: string; fence: number }
-const integer = (v: unknown) => Number.isSafeInteger(v) && Number(v) >= 0
 function fail(kind = 'session-recovery-required'): never {
   throw new AcquisitionError(kind)
 }
-function owned(
-  control: FirebaseFirestore.DocumentData | undefined,
-  ownership: Ownership,
-  now: Date,
-) {
+function owned(control: unknown, ownership: Ownership, now: Date) {
+  const valid = parseValue(ControlSchema, control, () => new AcquisitionError('ownership-lost'))
   if (
-    !control ||
-    control.schemaVersion !== 1 ||
     !ownership.owner ||
-    control.owner !== ownership.owner ||
-    control.fence !== ownership.fence ||
-    !(control.leaseUntil instanceof Timestamp) ||
-    control.leaseUntil.toMillis() <= now.getTime()
+    valid.owner !== ownership.owner ||
+    valid.fence !== ownership.fence ||
+    !valid.leaseUntil ||
+    valid.leaseUntil.toMillis() <= now.getTime()
   )
     fail('ownership-lost')
-  return control
+  return valid
 }
 
 // Requires an already claimed global lease. Claim/heartbeat/job finalization are FS-2c.
@@ -46,28 +42,24 @@ export class OfficialSessionRepository {
           data = doc.data()
         if (!control.updatesEnabled || control.blockedReason !== null) fail('updates-disabled')
         try {
-          if (
-            !data ||
-            data.schemaVersion !== 1 ||
-            !integer(data.sessionGeneration) ||
-            !integer(data.revision) ||
-            data.restorationState !== 'usable' ||
-            data.inFlight !== null ||
-            !(data.initializationRetryAt instanceof Timestamp)
+          const saved = parseValue(
+            SessionDocumentSchema,
+            data,
+            () => new AcquisitionError('session-recovery-required'),
           )
-            fail()
+          if (saved.restorationState !== 'usable' || saved.inFlight !== null) fail()
           const state = restoreSession(
             {
-              ...data,
-              initializationRetryAt: data.initializationRetryAt.toMillis(),
-              initializationError: data.initializationError ?? 'invalid-home',
-            } as Parameters<typeof restoreSession>[0],
+              ...saved,
+              initializationRetryAt: saved.initializationRetryAt.toMillis(),
+              initializationError: saved.initializationError ?? 'invalid-home',
+            },
             now,
           )
           return {
             state,
-            revision: data.revision as number,
-            generation: data.sessionGeneration as number,
+            revision: saved.revision,
+            generation: saved.sessionGeneration,
           }
         } catch {
           if (data && data.restorationState !== 'disabled')
@@ -87,10 +79,12 @@ export class OfficialSessionRepository {
           const [controlDoc, doc] = await tx.getAll(this.db.doc('control/acquisition'), ref)
           const now = this.now(),
             control = owned(controlDoc.data(), ownership, now),
-            data = doc.data()
+            data = parseValue(
+              SessionDocumentSchema,
+              doc.data(),
+              () => new AcquisitionError('session-recovery-required'),
+            )
           if (
-            !data ||
-            data.schemaVersion !== 1 ||
             data.revision !== revision ||
             data.sessionGeneration !== generation ||
             data.restorationState !== 'usable'
@@ -99,11 +93,7 @@ export class OfficialSessionRepository {
           if (event.kind === 'before-request') {
             if (!control.updatesEnabled || control.blockedReason !== null) fail('updates-disabled')
             if (data.inFlight !== null) fail()
-            if (
-              !(control.nextRequestNotBefore instanceof Timestamp) ||
-              control.nextRequestNotBefore.toMillis() > now.getTime()
-            )
-              fail('request-too-soon')
+            if (control.nextRequestNotBefore.toMillis() > now.getTime()) fail('request-too-soon')
           } else if (
             data.inFlight &&
             (data.inFlight.owner !== ownership.owner || data.inFlight.fence !== ownership.fence)

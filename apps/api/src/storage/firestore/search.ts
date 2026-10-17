@@ -1,8 +1,11 @@
-import { DocumentSnapshot, Firestore, Timestamp } from '@google-cloud/firestore'
+import * as v from 'valibot'
+import { PositiveInteger, parseValue } from '../../validation'
+import { ScopeSchema, AttemptSchema } from './schemas'
+import { DocumentSnapshot, Firestore } from '@google-cloud/firestore'
 import { ApiError, Input, resolveInput } from '../../availability-api/input'
 import { ReferenceRepository } from './reference-data'
 import { SnapshotRepository } from './snapshots'
-import { jsonBytes, limits, measureDocument, scopeId, validId } from './snapshot-codec'
+import { jsonBytes, limits, measureDocument, scopeId } from './snapshot-codec'
 
 type OutputSlot = {
   parkId: string
@@ -47,25 +50,12 @@ export class FirestoreSearch {
     }) => void,
     private readonly maxReadBytes = limits.searchBytes,
   ) {
-    if (
-      !Number.isSafeInteger(maxReadBytes) ||
-      maxReadBytes < 1 ||
-      maxReadBytes > limits.searchBytes
-    )
+    if (!v.is(PositiveInteger, maxReadBytes) || maxReadBytes > limits.searchBytes)
       throw new Error('invalid-read-budget')
   }
   async search(input: Input, now = new Date()) {
     const query = resolveInput(input)
     const minute = (clock: string) => Number(clock.slice(0, 2)) * 60 + Number(clock.slice(3))
-    if (
-      !query.weekdays.every((d) => Number.isInteger(d) && d >= 0 && d <= 6) ||
-      ![query.timeFrom, query.timeTo, query.minDurationMinutes].every(Number.isSafeInteger) ||
-      query.timeFrom < 0 ||
-      query.timeTo > 1440 ||
-      query.minDurationMinutes < 0 ||
-      query.minDurationMinutes > 1440
-    )
-      throw new ApiError(400, 'invalid_request', '検索条件を確認してください。')
     const started = performance.now()
     let statistics = { documentReads: 0, wireBytes: 0 }
     try {
@@ -108,35 +98,22 @@ export class FirestoreSearch {
             if (!park) throw new ApiError(400, 'invalid_request', '未対応の公園・種目です。')
             const scopeDocument = await tx.get(this.db.doc(`scopes/${id}`))
             observe(scopeDocument)
-            const scope = scopeDocument.data()
+            const scope = scopeDocument.exists
+              ? parseValue(ScopeSchema, scopeDocument.data(), unavailable)
+              : undefined
             if (
               scope &&
-              (scope.schemaVersion !== 1 ||
-                !Number.isSafeInteger(scope.publicationGeneration) ||
-                scope.publicationGeneration < 0 ||
-                scope.parkId !== target.parkId ||
+              (scope.parkId !== target.parkId ||
                 scope.surface !== target.surface ||
-                scope.weekStart !== target.startDate ||
-                (scope.latestSnapshotId !== null && !validId(scope.latestSnapshotId)))
+                scope.weekStart !== target.startDate)
             )
               throw unavailable()
             let latestAttempt: Attempt | null = null
             if (scope?.latestJobId != null) {
-              if (!validId(scope.latestJobId)) throw unavailable()
               const jobDocument = await tx.get(this.db.doc(`jobs/${scope.latestJobId}`))
               observe(jobDocument)
-              const job = jobDocument.data()
-              if (
-                !job ||
-                job.schemaVersion !== 1 ||
-                job.scopeId !== id ||
-                !['queued', 'running', 'succeeded', 'failed'].includes(job.state) ||
-                !(job.errorCode === null || typeof job.errorCode === 'string') ||
-                !['pending', 'submitted', 'recovery_required'].includes(job.dispatchState) ||
-                !(job.queuedAt instanceof Timestamp) ||
-                (job.state === 'running' && !(job.leaseUntil instanceof Timestamp))
-              )
-                throw unavailable()
+              const job = parseValue(AttemptSchema, jobDocument.data(), unavailable)
+              if (job.scopeId !== id) throw unavailable()
               latestAttempt = {
                 jobId: scope.latestJobId,
                 state: job.state,
@@ -147,17 +124,15 @@ export class FirestoreSearch {
                   (job.dispatchState === 'recovery_required' ||
                     (job.dispatchState === 'pending' &&
                       now.getTime() - job.queuedAt.toMillis() >= 120000) ||
-                    (job.state === 'running' && job.leaseUntil.toMillis() <= now.getTime())),
+                    (job.state === 'running' &&
+                      (job.leaseUntil?.toMillis() ?? 0) <= now.getTime())),
               }
             }
             const snapshotId = scope?.latestSnapshotId ?? null
             let lastSuccessAt: string | null = null
             if (snapshotId) {
               const stored = await snapshots.read(tx, snapshotId, target, observe)
-              if (
-                !(scope?.observedAt instanceof Timestamp) ||
-                !scope.observedAt.isEqual(stored.snapshot.completedAt)
-              )
+              if (!scope?.observedAt || !scope.observedAt.isEqual(stored.snapshot.completedAt))
                 throw unavailable()
               lastSuccessAt = stored.snapshot.completedAt.toDate().toISOString()
               const facilities = new Map(stored.snapshot.facilities.map((f) => [f.id, f]))

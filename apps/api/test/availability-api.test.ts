@@ -29,6 +29,8 @@ test('API schemas reject invalid input; missing storage returns safe 503', async
       },
       { targets: [{ parkId: '1280', surface: 'grass' }], weekdays: [] },
       { targets: [{ parkId: '1280', surface: 'grass' }], timeFrom: '24:00' },
+      { targets: [{ parkId: '1280', surface: 'grass' }], minDurationMinutes: '30' },
+      { targets: [{ parkId: '1280', surface: 'grass' }], includeHolidays: 'false' },
       { targets: [{ parkId: '1280', surface: 'grass' }], dateFom: '2026-10-10' },
     ]) {
       const response = await request(payload)

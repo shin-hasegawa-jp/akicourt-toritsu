@@ -1,59 +1,60 @@
+import * as v from 'valibot'
+import { DateString, parseValue } from '../validation'
 import { createHash } from 'node:crypto'
 import { Pool, PoolClient } from 'pg'
 import calendar from './holiday-calendar'
 import { transaction } from './database'
-import { validateDate } from '../availability/parser'
 
 export const HOLIDAY_SOURCE = 'https://www8.cao.go.jp/chosei/shukujitsu/syukujitsu.csv'
 type Holiday = { date: string; name: string }
 type Year = { year: number; count: number; sha256: string; holidays: Holiday[] }
-const record = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === 'object' && !Array.isArray(value)
+export const yearSchema = v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(9999))
+export const CalendarSchema = v.object({
+  source: v.literal(HOLIDAY_SOURCE),
+  verifiedAt: DateString,
+  years: v.array(
+    v.object({
+      year: yearSchema,
+      count: v.number(),
+      sha256: v.string(),
+      holidays: v.pipe(
+        v.array(
+          v.object({
+            date: DateString,
+            name: v.pipe(
+              v.string(),
+              v.check((s) => !!s.trim() && !/[\t\r\n]/.test(s)),
+            ),
+          }),
+        ),
+        v.minLength(1),
+      ),
+    }),
+  ),
+})
 const invalid = (): never => {
   throw new Error('invalid-holiday-calendar')
 }
 
 // The checksum detects accidental edits/truncation; official completeness is
 // established by reviewing the CSV against the Cabinet Office annual tables.
-export function validateCalendar(data: unknown, years: number[]): Year[] {
-  if (
-    !record(data) ||
-    data.source !== HOLIDAY_SOURCE ||
-    typeof data.verifiedAt !== 'string' ||
-    !Array.isArray(data.years) ||
-    !years.length ||
-    new Set(years).size !== years.length ||
-    years.some((year) => !Number.isInteger(year) || year < 1 || year > 9999)
+export function validateCalendar(input: unknown, years: number[]): Year[] {
+  const data = parseValue(CalendarSchema, input, () => new Error('invalid-holiday-calendar'))
+  parseValue(
+    v.pipe(
+      v.array(yearSchema),
+      v.minLength(1),
+      v.check((ys) => new Set(ys).size === ys.length),
+    ),
+    years,
+    () => new Error('invalid-holiday-calendar'),
   )
-    return invalid()
-  validateDate(data.verifiedAt)
   const available = new Map<number, Year>()
   for (const entry of data.years) {
-    if (
-      !record(entry) ||
-      typeof entry.year !== 'number' ||
-      !Number.isInteger(entry.year) ||
-      entry.year < 1 ||
-      entry.year > 9999 ||
-      available.has(entry.year) ||
-      !Array.isArray(entry.holidays) ||
-      !entry.holidays.length ||
-      entry.count !== entry.holidays.length ||
-      typeof entry.sha256 !== 'string'
-    )
-      return invalid()
+    if (available.has(entry.year) || entry.count !== entry.holidays.length) return invalid()
     const holidays: Holiday[] = []
     let previous = ''
     for (const row of entry.holidays) {
-      if (
-        !record(row) ||
-        typeof row.date !== 'string' ||
-        typeof row.name !== 'string' ||
-        !row.name.trim() ||
-        /[\t\r\n]/.test(row.name)
-      )
-        return invalid()
-      validateDate(row.date)
       if (Number(row.date.slice(0, 4)) !== entry.year || row.date <= previous) return invalid()
       previous = row.date
       holidays.push({ date: row.date, name: row.name })
