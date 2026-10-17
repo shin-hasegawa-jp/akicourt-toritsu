@@ -39,6 +39,18 @@ docker compose -f compose.dev.yaml -f compose.db.yaml --profile acquisition stop
 
 403/429では全体停止し、再起動しても通信を再開しない。原因確認・ワーカー停止後、上の`exec -T api npm run storage --`に`reset-block`を指定して解除する。同一週の再要求は成功・失敗とも15分間再利用する。`npm run test:db`は接続先DBの隔離スキーマで検証する（`DATABASE_URL`必須）。
 
+## Firestoreのローカル検証
+
+Java・Firebase CLIをDocker内で動かす。ホストへのJava導入やGCPログインは不要。
+
+```sh
+docker compose -f compose.dev.yaml -f compose.firestore.yaml up -d --build --wait --wait-timeout 300
+docker compose -f compose.dev.yaml -f compose.firestore.yaml exec -T api node scripts/check-firestore-emulator.cjs
+docker compose -f compose.dev.yaml -f compose.firestore.yaml down
+```
+
+APIコンテナからは`firestore:8080`、ホストからは`127.0.0.1:17593`へ接続する。ホスト側ポートは`FIRESTORE_PORT`で変更できる。プロジェクトは`demo-akicourt-local`固定。エミュレータ再起動でデータは消える。現時点の検索・更新APIはPostgreSQL版のため、この構成ではSDKの接続確認までを行う。通常のWeb/API起動ではエミュレータは不要。
+
 ## ホストで起動
 
 Node.js 24.18.0（`.nvmrc`）を使用。各アプリで`npm ci`を実行後、別ターミナルで起動する。Dockerと同じポートを同時に使わない。
