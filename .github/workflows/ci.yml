@@ -81,3 +81,27 @@ jobs:
         run: npm run test:db
         env:
           DATABASE_URL: postgresql://akicourt:ci-password@127.0.0.1:5432/akicourt_test
+
+  firestore:
+    name: Firestore
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      COMPOSE_PROJECT_NAME: akicourt-firestore-ci
+    steps:
+      - uses: actions/checkout@v5
+      - name: Start Firestore emulator
+        run: docker compose -f compose.dev.yaml -f compose.firestore.yaml up -d --build --wait --wait-timeout 300 firestore
+      - name: SDK connectivity and reference storage tests
+        run: |
+          docker compose -f compose.dev.yaml -f compose.firestore.yaml run --rm --build api sh -c '
+            npm ci --ignore-scripts --no-audit --no-fund &&
+            node scripts/check-firestore-emulator.cjs &&
+            npm run test:firestore
+          '
+      - name: Logs on failure
+        if: failure()
+        run: docker compose -f compose.dev.yaml -f compose.firestore.yaml logs --tail 100 api firestore
+      - name: Clean up
+        if: always()
+        run: docker compose -f compose.dev.yaml -f compose.firestore.yaml down --volumes
