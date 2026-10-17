@@ -1,0 +1,13 @@
+{
+  "indexes": [],
+  "fieldOverrides": [
+    { "collectionGroup": "chunks", "fieldPath": "payload", "indexes": [] },
+    { "collectionGroup": "snapshots", "fieldPath": "facilities", "indexes": [] },
+    { "collectionGroup": "snapshots", "fieldPath": "chunkIds", "indexes": [] },
+    { "collectionGroup": "snapshots", "fieldPath": "chunkChecksums", "indexes": [] },
+    { "collectionGroup": "holidayYears", "fieldPath": "holidays", "indexes": [] },
+    { "collectionGroup": "officialSessions", "fieldPath": "cookieJar", "indexes": [] },
+    { "collectionGroup": "officialSessions", "fieldPath": "prepared", "indexes": [] },
+    { "collectionGroup": "officialSessions", "fieldPath": "targets", "indexes": [] }
+  ]
+}

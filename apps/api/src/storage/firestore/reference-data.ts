@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
-import { Firestore, Timestamp, Transaction } from '@google-cloud/firestore'
+import { DocumentSnapshot, Firestore, Timestamp, Transaction } from '@google-cloud/firestore'
 import { CookieJar } from 'tough-cookie'
 import parks from '../park-options'
 import calendar from '../holiday-calendar'
@@ -201,50 +201,51 @@ export class ReferenceRepository {
     )
   }
 
-  async read() {
-    return this.db.runTransaction(
-      async (tx) => {
-        const manifest = (await tx.get(this.db.doc('control/referenceData'))).data()
-        if (!manifest) throw new Error('reference-data-not-initialized')
-        const parkRows = await tx.get(this.db.collection('parkSurfaces'))
-        const holidayRows = await tx.get(this.db.collection('holidayYears'))
-        if (!schema(manifest) || !Array.isArray(manifest.parkIds) || !Array.isArray(manifest.years))
-          throw new Error('inconsistent-reference-data')
-        const active = parkRows.docs
-          .filter((p) => p.data().enabled === true)
-          .map((p) => p.data())
-          .sort((a, b) => a.officialOrder - b.officialOrder)
-        const years = holidayRows.docs.map((y) => y.data()).sort((a, b) => a.year - b.year)
-        const bundle = referenceBundle({
-          parks: active as Park[],
-          years: manifest.years,
-          calendar: {
-            source: years[0]?.source,
-            verifiedAt: years[0]?.verifiedAt,
-            years: years.map((y) => ({ ...y, sha256: y.checksum })),
-          },
-        })
-        if (
-          !isDeepStrictEqual(manifest, bundle.manifest) ||
-          !isDeepStrictEqual(active, bundle.parkDocuments) ||
-          !isDeepStrictEqual(years, bundle.holidayDocuments) ||
-          active.some(
-            (p) =>
-              !parkRows.docs.some(
-                (d) => d.id === `${p.parkId}_${p.surface}` && isDeepStrictEqual(d.data(), p),
-              ),
-          ) ||
-          years.some((y) => !holidayRows.docs.some((d) => d.id === String(y.year)))
-        )
-          throw new Error('inconsistent-reference-data')
-        return {
-          version: bundle.manifest.activeVersion,
-          parks: active as typeof bundle.parkDocuments,
-          years: bundle.holidayDocuments,
-        }
-      },
-      { readOnly: true },
-    )
+  async read(tx?: Transaction, observe?: (document: DocumentSnapshot) => void) {
+    const action = async (tx: Transaction) => {
+      const manifestDocument = await tx.get(this.db.doc('control/referenceData'))
+      observe?.(manifestDocument)
+      const manifest = manifestDocument.data()
+      if (!manifest) throw new Error('reference-data-not-initialized')
+      const parkRows = await tx.get(this.db.collection('parkSurfaces'))
+      const holidayRows = await tx.get(this.db.collection('holidayYears'))
+      for (const document of [...parkRows.docs, ...holidayRows.docs]) observe?.(document)
+      if (!schema(manifest) || !Array.isArray(manifest.parkIds) || !Array.isArray(manifest.years))
+        throw new Error('inconsistent-reference-data')
+      const active = parkRows.docs
+        .filter((p) => p.data().enabled === true)
+        .map((p) => p.data())
+        .sort((a, b) => a.officialOrder - b.officialOrder)
+      const years = holidayRows.docs.map((y) => y.data()).sort((a, b) => a.year - b.year)
+      const bundle = referenceBundle({
+        parks: active as Park[],
+        years: manifest.years,
+        calendar: {
+          source: years[0]?.source,
+          verifiedAt: years[0]?.verifiedAt,
+          years: years.map((y) => ({ ...y, sha256: y.checksum })),
+        },
+      })
+      if (
+        !isDeepStrictEqual(manifest, bundle.manifest) ||
+        !isDeepStrictEqual(active, bundle.parkDocuments) ||
+        !isDeepStrictEqual(years, bundle.holidayDocuments) ||
+        active.some(
+          (p) =>
+            !parkRows.docs.some(
+              (d) => d.id === `${p.parkId}_${p.surface}` && isDeepStrictEqual(d.data(), p),
+            ),
+        ) ||
+        years.some((y) => !holidayRows.docs.some((d) => d.id === String(y.year)))
+      )
+        throw new Error('inconsistent-reference-data')
+      return {
+        version: bundle.manifest.activeVersion,
+        parks: active as typeof bundle.parkDocuments,
+        years: bundle.holidayDocuments,
+      }
+    }
+    return tx ? action(tx) : this.db.runTransaction(action, { readOnly: true })
   }
 
   async status() {
