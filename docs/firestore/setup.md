@@ -4,7 +4,7 @@
 
 ## 選定
 
-サーバーでFirestoreだけを使用するため`@google-cloud/firestore`を直接使う（Firebase AdminのAuth等は不要）。Cloud Tasksは`@google-cloud/tasks`、ローカルCLIはdevDependencyの`firebase-tools`。WebへAuth SDKは追加しない。pgは旧経路を残す間は削除しない。
+サーバーでFirestoreだけを使用するため`@google-cloud/firestore`を直接使う（Firebase AdminのAuth等は不要）。Cloud Tasksは`@google-cloud/tasks`、ローカルCLIはdevDependencyの`firebase-tools`。WebへAuth SDKは追加しない。pgは置換途中の現行コードの検証用に一時的に残す。リリースはFirestoreのみで、FS-3までに不要コード・依存を整理する。データ変換・転送や本番DB切替の準備は不要。
 2026-10-17のnpmレジストリ確認値：Firestore 9.3.1 / Node >=22、Tasks 7.3.0 / Node >=22、firebase-tools 15.34.0 / Node >=20 || >=22 || >=24。プロジェクトのNode 24.18.0を使う。バージョンは固定しlockfileへ記録する。
 
 リポジトリ直下で：

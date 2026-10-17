@@ -1,6 +1,6 @@
 # FS-0 契約・データモデル
 
-2026-10-17。以下は承認対象の設計値で、現在の実装値ではない。利用者認証、定期取得、通知、固定IP/NAT、金額による自動停止は追加しない。
+2026-10-17。GCP未デプロイの新規アプリを空のFirestoreから初回リリースする。既存DB・取得結果・ジョブ・Cookie・停止状態のデータ移行、二重DB対応、旧本番への切戻しは対象外。以下は承認対象の設計値で、現在の実装値ではない。利用者認証、定期取得、通知、固定IP/NAT、金額による自動停止は追加しない。
 
 ## 公開APIと画面
 
@@ -15,7 +15,7 @@ job応答（更新レスポンス内も同じ）に次を必須追加する。FS
 | dispatchState | pending / submitted / recovery_required。登録状態であり実行状態とは別 |
 | recoveryRequired | boolean。運用者による復旧が必要か |
 
-pendingは「取得要求を保存済み・配送登録待ち」、submittedのqueuedは「取得待ち」、runningは「取得中」。pendingが120秒継続、submittedのqueuedが20分継続、またはlease失効を検出したらrecoveryRequired=trueとして表示し、管理CLIへ誘導する。検索・参照は経過時刻から算出でき、GETによるDB書込みは不要。CLIが調査して保存するrecovery_requiredも同じ表示。submittedだけでtaskの存在を保証しない。
+pendingは「取得要求を保存済み・配送登録待ち」、submittedのqueuedは「取得待ち」、runningは「取得中」。pendingが120秒継続、またはrunningのlease失効でrecoveryRequired=trueとし、画面には「登録確認が必要」「取得中断の確認が必要」と表示する。公開利用者へ管理CLI操作は求めない。submittedのqueuedは経過時間だけで復旧必須としない。単一配送で最大20jobが順に処理される場合、830秒×19件で約263分の待機も起こり得るため、20分固定で障害扱いしない。待機表示と緩やかなpollを継続し、運用者がtaskの存在・キュー状態・試行履歴を照合して消失等を確定した場合だけrecovery_requiredを保存する。FIFOや待ち時間の上限は保証しない。GETによるDB書込みは不要。submittedだけでtaskの存在を保証しない。
 
 queued/runningが1件でもあれば202、全jobが終端済みなら200（既存契約。再利用した未完了jobも202）。登録遅延でも保存確定済みなら202。同じ更新再送は同じ有効jobを使いpending登録を再試行する。保存を確認できない要求は202にしない。応答喪失後も二重取得しない。停止中の新規更新は503・worker_unavailable。平常時のscale-to-zeroは受付可能。既存queuedが停止中に配送されたら公式通信せずfailed、errorCode=updates_disabledまたはaccess_blockedで終端化する。session_recovery_required・interruptedもfailedとして理由を表示し、独自の公開stateを増やさない。
 
@@ -23,7 +23,7 @@ queued/runningが1件でもあれば202、全jobが終端済みなら200（既�
 
 429はerror.code=rate_limited / queue_capacity_exceeded / daily_job_limit_exceeded。Retry-Afterは正の整数秒（短時間枠は残り時間切上げ、queueは30秒、日次は翌JST日境界まで）。API予算超過は503・request_timeout、読取上限超過は503・search_capacity_exceeded、不完全snapshotは503・storage_unavailable。10,000枠超過時の既存エラー契約は維持し、黙って切り捨てない。
 
-Webは更新の連打を無効化、jobを5秒以上の間隔で確認（10jobでも最大120参照/分）。429/503/ネットワーク失敗は5/10/20/40/60秒＋最大20%のjitterでバックオフ、Retry-Afterを下回らない。succeeded/failed、recoveryRequired=trueでは自動poll停止、再確認と更新の手動操作を残す。登録待ちを取得中と表示しない。timeout後の手動再要求も同じscopeを利用する。
+Webは更新の連打を無効化、jobを5秒以上の間隔で確認（10jobでも最大120参照/分）。状態の変わらないqueuedは5/15/30/60秒へ段階的に間隔を延ばし、runningへ変われば5秒へ戻す。画面が非表示の間は自動pollを停止し、再表示時に再確認する。429/503/ネットワーク失敗は5/10/20/40/60秒＋最大20%のjitterでバックオフ、Retry-Afterを下回らない。succeeded/failed、recoveryRequired=trueでは自動poll停止、再確認と更新の手動操作を残す。登録待ちを取得中と表示しない。timeout後の手動再要求も同じscopeを利用する。
 
 ## 制限と処理予算
 
@@ -37,9 +37,11 @@ Webは更新の連打を無効化、jobを5秒以上の間隔で確認（10job�
 | ACQUISITION_DAILY_NEW_JOB_LIMIT | 100 | JST日付、新規jobのみ |
 | API_REQUEST_BUDGET_MS | 45000 | ハンドラ受付から、workerは対象外 |
 
-短時間枠はエンドポイント種別ごとの固定60秒窓で、単調時計を使いFirestore前に判定する。窓境界の集中は許容する。IP/転送ヘッダーは使わない。起動時に正の安全な整数として検証、未知backend/roleや不正値は起動失敗。API最大2台の枠は共有されず、再起動でリセットする。金額上限ではない。1人が最大10jobをpollしても参照300/分内に収まる初期値とする。
+短時間枠はエンドポイント種別ごとの固定60秒窓で、単調時計を使いFirestore前に判定する。窓境界の集中は許容する。IP/転送ヘッダーは使わない。起動時に正の安全な整数として検証、未知roleや不正値は起動失敗。API最大2台の枠は共有されず、再起動でリセットする。金額上限ではない。1人が最大10jobをpollしても参照300/分内に収まる初期値とする。
 
 更新要求内の全scopeを同じtransactionで判定し、新規分Nを数える。queueのN加算とJST当日のusageのN加算、scope/job作成を一括commit。1件でも上限を超えたら要求全体を429、部分受付しない。全件再利用はN=0で上限到達中も可能（全体停止時の新規受付は不可）。終端遷移時にqueueを一度だけ減算、日次数は減らさない。重複配送/失敗でも二重減算しない。CLIは更新停止・worker静止を確認し、全未終端jobとの照合からqueueを修復する。日次数は作成日時/計上日で再集計する。
+
+最大10taskを各5秒ずつ直列登録すると45秒を超える。登録処理は要求全体で最大10秒、同時2件までとし、保存済みjobのpendingを残して予算内に202を返せるようにする。応答後の処理継続に依存せず、未登録分は同じ更新の再送または手動repair-outboxで補う。応答構築の残り時間も確保する。
 
 45秒はコールドスタート/Hosting待機を含まない。残り時間をDB読み取り・transaction・Tasks登録へ渡す（個別RPCは最大10秒と残時間の小さい方、transaction最大3試行、Tasks登録最大5秒）。予算後に新規処理を開始しない。SDKの取消不能な既発行処理は後からcommitし得るので、Promise.raceだけで二重登録対策を済ませない。outboxで整合させ、短縮時計でFS-3テストする。
 
@@ -93,15 +95,15 @@ DTO v1はcookieJar（tough-cookieのserialize結果）、initialized、prepared�
 4. 正常終了はDTO保存確認後にlease解放。すべての書込みはowner/fence/generation/revision比較で旧workerを拒否する。明示的セッションタイムアウトだけ1回home→施設→週間取得で復旧し、Cookieと準備情報を新世代へ一緒に切替える。
 5. SIGTERM/HTTP abort/lease更新失敗/開始から830秒でAbortSignalを伝播。840秒より前の中断開始を確保する。task dispatchDeadlineは900秒、Cloud Run worker timeoutも900秒。deadlineだけでプロセス停止と考えない。
 
-inFlightが残る終了・送達不明timeout・lease失効はjobをinterruptedとして少なくとも15分cooldownとsession復旧待ちにする。自動で新ownerへ引継がない。失効ownerが通信中かもしれないため、CLIでworker停止/進行要求終了を確認してから復旧する。home403/429は全体blockedを保存しtask再配送やセッション破棄で解除しない。invalid-home/初期化失敗も理由と次回初期化時刻（最低15分後）を共有し、状態不明なら運用者確認まで待つ。移行前の停止・cooldown不明、home拒否未解決はupdatesEnabled=falseで開始。
+inFlightが残る終了・送達不明timeout・lease失効はjobをinterruptedとして少なくとも15分cooldownとsession復旧待ちにする。自動で新ownerへ引継がない。失効ownerが通信中かもしれないため、CLIでworker停止/進行要求終了を確認してから復旧する。home403/429は全体blockedを保存しtask再配送やセッション破棄で解除しない。invalid-home/初期化失敗も理由と次回初期化時刻（最低15分後）を共有し、状態不明なら運用者確認まで待つ。初回もupdatesEnabled=falseで開始する。過去の開発検証で公式から拒否された事実が未解決なら、DB移行はせず運用確認事項として記録し、再開を判断する。
 
-保存後応答喪失を含むタスク登録は`jobId-generation`の決定名、本文はjobId/generationのみ。createTask成功/AlreadyExists後にdispatch更新するが終端jobをqueuedに戻さない。配送側は旧generation/終端をセッション接触前に2xx。業務失敗をDB保存済みなら2xx、DB障害で確定不能なら5xx。CLIの再配送ではtaskの状態と旧処理静止を確認しgenerationを増やしてpendingへ戻す。task名の重複排除期間をexactly-onceの根拠にしない。自動outbox走査は導入せず、120秒の登録遅延・20分の待機・試行上限消失を手動調査する。
+保存後応答喪失を含むタスク登録は`jobId-generation`の決定名、本文はjobId/generationのみ。createTask成功/AlreadyExists後にdispatch更新するが終端jobをqueuedに戻さない。配送側は旧generation/終端をセッション接触前に2xx。業務失敗をDB保存済みなら2xx、DB障害で確定不能なら5xx。CLIの再配送ではtaskの状態と旧処理静止を確認しgenerationを増やしてpendingへ戻す。task名の重複排除期間をexactly-onceの根拠にしない。自動outbox走査は導入せず、120秒の登録遅延・長期待機・試行上限消失を手動調査する。queuedの経過時間だけではtask消失を確定しない。
 
 別プロセスの同一DTO復元、SDK更新互換、Cookie非露出、応答後保存前終了、古いownerの遅延完了、home拒否、復旧失敗、保存失敗時の内部retry停止をFS-2でテストする。異なるCloud Runインスタンス/IPでの公式再利用はFS-4で限定確認し、IP結合が判明したら取得停止して再設計する。
 
 ## 起動・管理CLI
 
-APP_ROLE=api/worker、STORAGE_BACKEND=postgres/firestoreを明示し、接続失敗時の自動fallbackを禁止。移行期間のpostgres経路とFirestore経路をテストで分離する。FirestoreにはGOOGLE_CLOUD_PROJECT・FIRESTORE_DATABASE_ID（初期(default)）が必須、ADCを使用し鍵JSONは追加しない。本番はFIRESTORE_EMULATOR_HOSTが存在するだけで起動拒否。ローカルFirestoreはdemoプロジェクトかつloopbackエミュレータ必須。PORTで0.0.0.0待受、server.tsとコンパイル済み管理CLIをFS-1〜3で追加する。
+APP_ROLE=api/workerを明示し、リリース対象の保存先はFirestoreのみとする。STORAGE_BACKENDによるDB切替は導入せず、接続失敗はエラーにする。現行PostgreSQLコードは各単位の置換まで残せるが、新旧を同時運用しない。FS-3完了までに旧worker/SQL/DB Composeへの参照を除去する。依存削除は開発者向けコマンドを用意し、実施後lockfileを確認する。FirestoreにはGOOGLE_CLOUD_PROJECT・FIRESTORE_DATABASE_ID（初期(default)）が必須、ADCを使用し鍵JSONは追加しない。本番はFIRESTORE_EMULATOR_HOSTが存在するだけで起動拒否。ローカルFirestoreはdemoプロジェクトかつloopbackエミュレータ必須。PORTで0.0.0.0待受、server.tsとコンパイル済み管理CLIをFS-1〜3で追加する。
 
 Tasks設定はTASKS_LOCATION/TASKS_QUEUE/TASKS_CALLER_SA/WORKER_URL（固定HTTPSベースURL、OIDC audience、利用者入力禁止）。createTaskにdispatchDeadline={seconds:900}を毎回指定する。
 
@@ -109,6 +111,7 @@ Tasks設定はTASKS_LOCATION/TASKS_QUEUE/TASKS_CALLER_SA/WORKER_URL（固定HTTP
 
 | command | 用途 |
 | --- | --- |
+| initialize | 新規DBへ制御・カウンター・空セッションを投入（下記）。既存状態のリセットは禁止 |
 | seed-reference-data | バージョン/checksumを検証し公園・祝日投入 |
 | status | 制御・件数・セッション復元可否表示 |
 | pause / resume | 更新停止/再開。resumeはblockedと復旧待ちを解除しない |
@@ -117,9 +120,10 @@ Tasks設定はTASKS_LOCATION/TASKS_QUEUE/TASKS_CALLER_SA/WORKER_URL（固定HTTP
 | repair-counters | 停止中にqueue/usageを照合・修復 |
 | session-disable / session-discard / session-recover | 使用停止・Cookie破棄・明示復旧。停止理由/初期化待機/cooldownは残す |
 | cleanup | 参照を保護し旧履歴・孤立chunk整理 |
-| migration-check | 旧停止理由/cooldown・必要ならsnapshot件数/日時/対象照合 |
 
-このCLIは未実装。旧workerと新workerは同時稼働しない。既存結果を捨てて再投入する場合もblocked/cooldownは移行する。exportを利用する場合はCookieを含む可能性を保護し、復元後の古いDTOは再利用しない。任意バックアップは初期完了条件に含めない。
+このCLIは未実装。初回はinitialize→seed-reference-data→停止状態の保存済み検索確認→IAM/Tasks確認→手動resume→公式1対象の順。initializeはtransactionでcontrol/acquisition（updatesEnabled=false、blockedReason=null、owner=null、fence=0、leaseなし、復旧generation初期値）、queueCapacity=0、公式Session DTO（jar空、initialized=false、prepared/targets空、initializationRetryAt=0、initializationError=null、revision=0、sessionGeneration=1、restorationState=usable、inFlight=null）を一括作成する。usageは最初の受付時にJST日付で0から作成。初期化済みの完全な状態ならno-op、不完全/矛盾した既存状態なら停止エラーで既存値を上書きしない。
+
+未初期化DBは起動/受付で明示エラーにし、セッション文書が見つからないことだけを根拠に自動生成しない。明示initialize済みの空DTOだけは初回のhome取得を許可する。以後の不正/欠損DTOと区別する。初回リリースのデータ移行ツールは作らない。稼働後のDB消失・復旧や任意バックアップは別の運用手順であり、初回投入と混同しない。
 
 ## 根拠と後続の確認
 
@@ -130,3 +134,5 @@ Tasks設定はTASKS_LOCATION/TASKS_QUEUE/TASKS_CALLER_SA/WORKER_URL（固定HTTP
 - [HTTP task作成](https://cloud.google.com/tasks/docs/creating-http-target-tasks)：OIDC付きHTTP配送。IAM/OIDCの実確認はFS-4。
 - [Firestore容量計算](https://cloud.google.com/firestore/docs/storage-size)：文書とindexを別に測定する。
 - [CookieJar](https://github.com/salesforce/tough-cookie/blob/master/api/docs/tough-cookie.cookiejar.md)：serialize/deserialize。既存6.0.2を維持して互換を試験する。
+
+レビューでの指摘と修正理由は[05の設計レビュー記録](review.md)を参照。

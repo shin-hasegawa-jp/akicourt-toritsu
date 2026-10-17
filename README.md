@@ -94,6 +94,6 @@ curl -sS http://127.0.0.1:17590/api/availability/search -H 'Content-Type: applic
 
 両マスターの更新は同一トランザクションで行い、失敗時は両方を元に戻す。同時実行は直列化し、公式への外部通信は行わない。異なるコード版の同時起動では後から同期した版が反映されるため、デプロイ時は古い版の再起動を避ける。
 
-## Firestore・Cloud Tasksへの移行計画
+## Firestore・Cloud Tasks構成への実装変更計画
 
-本番構成への変更は[FS-0の設計・導入手順](docs/firestore/README.md)からレビュー単位で進める。現行はPostgreSQL版。Firestore実装・依存導入・GCP反映の完了状況はレビュー記録を参照する。
+空のDBからの初回リリースに向けた変更は[FS-0の設計・導入手順](docs/firestore/README.md)からレビュー単位で進める。現行はPostgreSQL版。Firestore実装・依存導入・GCP反映の完了状況はレビュー記録を参照する。
