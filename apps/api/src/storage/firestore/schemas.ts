@@ -40,8 +40,15 @@ export const SessionDocumentSchema = v.looseObject({
   initializationError: v.nullable(v.string()),
   lastUsedAt: v.nullable(TimestampSchema),
   restorationState: v.picklist(['usable', 'recovery_required', 'disabled']),
-  // Any remaining marker blocks restoration. Its detailed protocol is owned by the worker.
-  inFlight: v.nullable(v.record(v.string(), v.unknown())),
+  inFlight: v.nullable(
+    v.object({
+      owner: v.string(),
+      fence: NonNegativeInteger,
+      requestId: Id,
+      startedAt: TimestampSchema,
+      phase: v.picklist(['sent', 'received', 'uncertain']),
+    }),
+  ),
 })
 export const ScopeSchema = v.looseObject({
   ...Versioned.entries,
@@ -141,3 +148,5 @@ export const HolidayDocumentSchema = v.looseObject({
   checksum: v.string(),
   version: v.string(),
 })
+
+export type AcquisitionControl = v.InferOutput<typeof ControlSchema>

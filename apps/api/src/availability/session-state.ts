@@ -59,13 +59,15 @@ export function serializeSession(state: AcquisitionSession): SessionState {
     initializationError: state.initializationError,
   }
 }
-export function restoreSession(input: unknown, now = new Date()) {
+export function parseSessionState(input: unknown): SessionState {
+  return parseValue(
+    SessionStateSchema,
+    input,
+    () => new AcquisitionError('session-recovery-required'),
+  )
+}
+export function restoreSession(value: SessionState, now = new Date()) {
   try {
-    const value = parseValue(
-      SessionStateSchema,
-      input,
-      () => new AcquisitionError('session-recovery-required'),
-    )
     if (value.cookieJar.version !== new CookieJar().serializeSync()!.version) return fail()
     const jar = CookieJar.deserializeSync(value.cookieJar)
     // Expired cookies must not make a persisted session look usable. Actual official

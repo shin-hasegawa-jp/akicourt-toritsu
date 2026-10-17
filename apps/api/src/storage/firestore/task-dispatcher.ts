@@ -1,5 +1,5 @@
 import * as v from 'valibot'
-import { NonNegativeInteger, Id, ProjectId, parseValue } from '../../validation'
+import { ProjectId, parseValue } from '../../validation'
 import { createHash } from 'node:crypto'
 import { CloudTasksClient, protos } from '@google-cloud/tasks'
 import { DispatchJob } from './jobs'
@@ -31,12 +31,6 @@ const TaskConfigSchema = v.object({
 })
 export type TaskConfig = v.InferOutput<typeof TaskConfigSchema>
 export function taskRequest(config: TaskConfig, job: DispatchJob) {
-  parseValue(TaskConfigSchema, config, () => new Error('invalid-task-config'))
-  parseValue(
-    v.object({ jobId: Id, generation: NonNegativeInteger }),
-    job,
-    () => new Error('invalid-task-config'),
-  )
   const url = new URL(config.workerUrl)
   const parent = `projects/${config.projectId}/locations/${config.location}/queues/${config.queue}`
   const id = createHash('sha256').update(`${job.jobId}/${job.generation}`).digest('hex')
@@ -63,7 +57,7 @@ export class CloudTaskDispatcher implements Dispatcher {
     private readonly config: TaskConfig,
     private readonly client = new CloudTasksClient(),
   ) {
-    taskRequest(config, { jobId: 'validation', generation: 1 })
+    this.config = parseValue(TaskConfigSchema, config, () => new Error('invalid-task-config'))
   }
   async submit(job: DispatchJob, timeoutMs: number) {
     try {

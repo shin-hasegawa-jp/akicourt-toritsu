@@ -1,5 +1,5 @@
 import { parseValue } from '../../validation'
-import { ControlSchema, SessionDocumentSchema } from './schemas'
+import { ControlSchema, SessionDocumentSchema, AcquisitionControl } from './schemas'
 import { randomUUID } from 'node:crypto'
 import { Firestore, Timestamp } from '@google-cloud/firestore'
 import { AcquisitionSession, SessionCheckpoint } from '../../availability/client'
@@ -11,17 +11,16 @@ type Ownership = { owner: string; fence: number }
 function fail(kind = 'session-recovery-required'): never {
   throw new AcquisitionError(kind)
 }
-function owned(control: unknown, ownership: Ownership, now: Date) {
-  const valid = parseValue(ControlSchema, control, () => new AcquisitionError('ownership-lost'))
+function owned(control: AcquisitionControl, ownership: Ownership, now: Date) {
   if (
     !ownership.owner ||
-    valid.owner !== ownership.owner ||
-    valid.fence !== ownership.fence ||
-    !valid.leaseUntil ||
-    valid.leaseUntil.toMillis() <= now.getTime()
+    control.owner !== ownership.owner ||
+    control.fence !== ownership.fence ||
+    !control.leaseUntil ||
+    control.leaseUntil.toMillis() <= now.getTime()
   )
     fail('ownership-lost')
-  return valid
+  return control
 }
 
 // Requires an already claimed global lease. Claim/heartbeat/job finalization are FS-2c.
@@ -38,7 +37,15 @@ export class OfficialSessionRepository {
       async (tx) => {
         const [controlDoc, doc] = await tx.getAll(this.db.doc('control/acquisition'), ref)
         const now = this.now(),
-          control = owned(controlDoc.data(), ownership, now),
+          control = owned(
+            parseValue(
+              ControlSchema,
+              controlDoc.data(),
+              () => new AcquisitionError('ownership-lost'),
+            ),
+            ownership,
+            now,
+          ),
           data = doc.data()
         if (!control.updatesEnabled || control.blockedReason !== null) fail('updates-disabled')
         try {
@@ -78,7 +85,15 @@ export class OfficialSessionRepository {
         async (tx) => {
           const [controlDoc, doc] = await tx.getAll(this.db.doc('control/acquisition'), ref)
           const now = this.now(),
-            control = owned(controlDoc.data(), ownership, now),
+            control = owned(
+              parseValue(
+                ControlSchema,
+                controlDoc.data(),
+                () => new AcquisitionError('ownership-lost'),
+              ),
+              ownership,
+              now,
+            ),
             data = parseValue(
               SessionDocumentSchema,
               doc.data(),

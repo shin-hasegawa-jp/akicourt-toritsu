@@ -24,8 +24,8 @@ export const WeekResponse = v.object({
           v.array(
             v.object({
               useDay: day,
-              status: v.unknown(),
-              alt: v.unknown(),
+              status: v.number(),
+              alt: v.string(),
               startTime: v.number(),
               endTime: v.number(),
               rsvNum: v.pipe(v.number(), v.integer(), v.minValue(0)),

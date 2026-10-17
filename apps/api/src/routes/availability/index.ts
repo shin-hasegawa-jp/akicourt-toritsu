@@ -62,7 +62,7 @@ const routes: FastifyPluginAsync<{ pool?: Pool }> = async (app, opts) => {
 
   // Validate before AJV can coerce values or strip unknown fields.
   const validateBody = (schema: v.GenericSchema) => async (request: { body: unknown }) => {
-    parseValue(
+    request.body = parseValue(
       schema,
       request.body,
       () => new ApiError(400, 'invalid_request', '入力内容を確認してください。'),

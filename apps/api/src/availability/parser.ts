@@ -26,12 +26,12 @@ export function offsetDate(value: string, days: number): string {
   date.setUTCDate(date.getUTCDate() + days)
   return date.toISOString().slice(0, 10)
 }
-function day(value: unknown): string {
+function day(value: string | number): string {
   const text = String(value)
   if (!/^\d{8}$/.test(text)) return fail()
   return validateDate(`${text.slice(0, 4)}-${text.slice(4, 6)}-${text.slice(6)}`)
 }
-function time(value: unknown): string {
+function time(value: number): string {
   const valid = parseValue(OfficialTime, value, () => new AcquisitionError('invalid-response'))
   const text = String(valid).padStart(4, '0')
   return `${text.slice(0, 2)}:${text.slice(2)}`

@@ -1,5 +1,5 @@
 import * as v from 'valibot'
-import { DateString, Clock, NonNegativeInteger, ParkId, Surface, parseValue } from '../validation'
+import { DateString, Clock, NonNegativeInteger, ParkId, Surface } from '../validation'
 import { offsetDate, validateDate } from '../availability/parser'
 import { japanToday, scopes } from '../storage/scopes'
 
@@ -27,17 +27,15 @@ export const InputSchema = v.strictObject({
       v.maxLength(7),
       v.check((ds) => new Set(ds).size === ds.length),
     ),
-    [0, 1, 2, 3, 4, 5, 6],
   ),
-  includeHolidays: v.optional(v.boolean(), false),
-  timeFrom: v.optional(Clock, '00:00'),
-  timeTo: v.optional(v.union([Clock, v.literal('24:00')]), '24:00'),
-  minDurationMinutes: v.optional(v.pipe(NonNegativeInteger, v.maxValue(1440)), 0),
+  includeHolidays: v.optional(v.boolean()),
+  timeFrom: v.optional(Clock),
+  timeTo: v.optional(v.union([Clock, v.literal('24:00')])),
+  minDurationMinutes: v.optional(v.pipe(NonNegativeInteger, v.maxValue(1440))),
 })
-export type Input = v.InferInput<typeof InputSchema>
-export function resolveInput(value: unknown, update = false) {
+export type Input = v.InferOutput<typeof InputSchema>
+export function resolveInput(input: Input, update = false) {
   try {
-    const input = parseValue(InputSchema, value, () => new Error('invalid-input'))
     if ((input.dateFrom === undefined) !== (input.dateTo === undefined)) throw new Error()
     const today = japanToday()
     const dateFrom = input.dateFrom ?? today
@@ -109,7 +107,7 @@ export const searchProperties = {
   timeTo: { type: 'string', pattern: '^(?:(?:[01]\\d|2[0-3]):[0-5]\\d|24:00)$' },
   minDurationMinutes: { type: 'integer', minimum: 1, maximum: 1440 },
 }
-export const bodySchema = (properties: object) => ({
+export const bodySchema = (properties: typeof commonProperties | typeof searchProperties) => ({
   type: 'object',
   additionalProperties: false,
   required: ['targets'],

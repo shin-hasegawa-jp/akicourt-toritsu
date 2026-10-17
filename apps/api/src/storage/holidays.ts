@@ -39,7 +39,16 @@ const invalid = (): never => {
 // The checksum detects accidental edits/truncation; official completeness is
 // established by reviewing the CSV against the Cabinet Office annual tables.
 export function validateCalendar(input: unknown, years: number[]): Year[] {
-  const data = parseValue(CalendarSchema, input, () => new Error('invalid-holiday-calendar'))
+  return validateCalendarData(
+    parseValue(CalendarSchema, input, () => new Error('invalid-holiday-calendar')),
+    years,
+  )
+}
+
+export function validateCalendarData(
+  data: v.InferOutput<typeof CalendarSchema>,
+  years: number[],
+): Year[] {
   parseValue(
     v.pipe(
       v.array(yearSchema),

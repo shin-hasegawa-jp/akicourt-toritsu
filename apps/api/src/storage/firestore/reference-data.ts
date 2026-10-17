@@ -15,7 +15,7 @@ import { DocumentSnapshot, Firestore, Timestamp, Transaction } from '@google-clo
 import { CookieJar } from 'tough-cookie'
 import parks from '../park-options'
 import calendar from '../holiday-calendar'
-import { HOLIDAY_SOURCE, validateCalendar, CalendarSchema } from '../holidays'
+import { HOLIDAY_SOURCE, validateCalendarData, CalendarSchema } from '../holidays'
 
 export type Park = { parkId: string; surface: 'grass' | 'hard'; name: string }
 type ReferenceSource = { parks: readonly Park[]; calendar: unknown; years: number[] }
@@ -37,12 +37,13 @@ function referenceBundle(source: ReferenceSource) {
     source.parks,
     () => new Error('invalid-park-catalog'),
   )
-  const years = validateCalendar(source.calendar, source.years)
-  const verifiedAt = parseValue(
+  const calendar = parseValue(
     CalendarSchema,
     source.calendar,
     () => new Error('invalid-holiday-calendar'),
-  ).verifiedAt
+  )
+  const years = validateCalendarData(calendar, source.years)
+  const verifiedAt = calendar.verifiedAt
   const normalized = parks.map((p, officialOrder) => ({
     schemaVersion: 1,
     parkId: p.parkId,
