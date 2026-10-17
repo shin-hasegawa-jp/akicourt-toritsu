@@ -93,3 +93,7 @@ curl -sS http://127.0.0.1:17590/api/availability/search -H 'Content-Type: applic
 祝日の管理元は`apps/api/src/storage/holiday-calendar.ts`、公園は`apps/api/src/storage/park-options.ts`。祝日は同梱年・日付・名称・完了記録をコードに合わせて置き換える（コードから外した年も削除する）。公園は追加・名称変更・再有効化を反映し、コードから外した公園は無効化して取得履歴を保持する。画面の選択肢は`GET /api/availability/parks`から取得し、APIのカタログ順に表示する。公園の追加・名称変更はAPIのカタログだけを更新する。過去のSQLマイグレーションは編集しない。
 
 両マスターの更新は同一トランザクションで行い、失敗時は両方を元に戻す。同時実行は直列化し、公式への外部通信は行わない。異なるコード版の同時起動では後から同期した版が反映されるため、デプロイ時は古い版の再起動を避ける。
+
+## Firestore・Cloud Tasksへの移行計画
+
+本番構成への変更は[FS-0の設計・導入手順](docs/firestore/README.md)からレビュー単位で進める。現行はPostgreSQL版。Firestore実装・依存導入・GCP反映の完了状況はレビュー記録を参照する。
