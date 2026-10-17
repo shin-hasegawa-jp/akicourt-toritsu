@@ -1,0 +1,12 @@
+FROM node:24.18.0-alpine
+RUN apk add --no-cache openjdk21-jre-headless
+WORKDIR /app
+RUN chown node:node /app
+USER node
+COPY --chown=node:node package.json package-lock.json ./
+RUN npm ci --ignore-scripts --no-audit --no-fund \
+    && ./node_modules/.bin/firebase setup:emulators:firestore
+COPY --chown=node:node firestore-emulator/ ./firestore-emulator/
+WORKDIR /tmp
+EXPOSE 8080
+CMD ["/app/node_modules/.bin/firebase", "emulators:start", "--only", "firestore", "--project", "demo-akicourt-local", "--config", "/app/firestore-emulator/firebase.json", "--non-interactive"]
