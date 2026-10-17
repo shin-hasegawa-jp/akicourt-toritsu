@@ -31,9 +31,10 @@ export type Result = {
   durationMs: number
   requests: Metric[]
 } & ({ state: 'success'; facilities: Facility[] } | { state: 'failed'; error: string })
-// Owned by one sequential worker; cookies never leave process memory.
+// Owned by one sequential worker; persistent checkpoints are optional.
 export class AcquisitionSession {
-  readonly jar = new CookieJar()
+  constructor(readonly jar = new CookieJar()) {}
+  checkpointFailed = false
   initialized = false
   readonly prepared = new Set<string>()
   initializationRetryAt = 0
@@ -44,11 +45,28 @@ export class AcquisitionSession {
   >()
 }
 
+export type SessionCheckpoint =
+  | { kind: 'before-request' }
+  | { kind: 'response'; error?: string; uncertain: boolean }
+  | { kind: 'state'; reset?: boolean }
+async function checkpoint(options: Options, state: AcquisitionSession, event: SessionCheckpoint) {
+  if (state.checkpointFailed) throw new AcquisitionError('session-checkpoint-failed')
+  try {
+    await options.checkpoint?.(state, event)
+  } catch (error) {
+    state.checkpointFailed = true
+    throw error instanceof AcquisitionError
+      ? error
+      : new AcquisitionError('session-checkpoint-failed')
+  }
+}
+
 export type Options = {
   parkName?: string
   session?: AcquisitionSession
   signal?: AbortSignal
   beforeRequest?: () => Promise<void>
+  checkpoint?: (state: AcquisitionSession, event: SessionCheckpoint) => Promise<void>
   onProgress?: (count: number) => Promise<void>
   fetchImpl?: typeof fetch
   timeoutMs?: number
@@ -64,7 +82,7 @@ class Session {
   readonly metrics: Metric[] = []
   constructor(
     private readonly options: Options,
-    state: AcquisitionSession,
+    private readonly state: AcquisitionSession,
   ) {
     this.jar = state.jar
   }
@@ -75,12 +93,14 @@ class Session {
       if (this.metrics.length) await (this.options.sleep || pause)(this.options.intervalMs ?? 2000)
       this.options.signal?.throwIfAborted()
       await this.options.beforeRequest?.()
+      await checkpoint(this.options, this.state, { kind: 'before-request' })
       this.options.signal?.throwIfAborted()
       const started = performance.now()
       const controller = new AbortController()
       const timer = setTimeout(() => controller.abort(), this.options.timeoutMs ?? 45000)
       const metric: Metric = { path, durationMs: 0, attempt: attempt + 1 }
       this.metrics.push(metric)
+      let responseError: string | undefined
       try {
         const cookie = await this.jar.getCookieString(url)
         const response = await (this.options.fetchImpl || fetch)(url, {
@@ -126,12 +146,18 @@ class Session {
                     ? 'timeout'
                     : 'network-error',
               )
+        responseError = classified.kind
         if (attempt === 0 && ['network-error', 'timeout', 'server-error'].includes(classified.kind))
           continue
         throw classified
       } finally {
         clearTimeout(timer)
         metric.durationMs = Math.round(performance.now() - started)
+        await checkpoint(this.options, this.state, {
+          kind: 'response',
+          error: responseError,
+          uncertain: ['network-error', 'timeout', 'interrupted'].includes(responseError ?? ''),
+        })
         await this.options.onProgress?.(this.metrics.length)
       }
     }
@@ -168,10 +194,12 @@ export async function acquire(targets: Target[], options: Options = {}): Promise
               state.initialized = true
               state.prepared.clear()
               state.initializationRetryAt = 0
+              await checkpoint(options, state, { kind: 'state' })
             } catch (error) {
               state.initializationRetryAt = Date.now() + 15 * 60 * 1000
               state.initializationError =
                 error instanceof AcquisitionError ? error.kind : 'invalid-response'
+              if (!state.checkpointFailed) await checkpoint(options, state, { kind: 'state' })
               throw error
             }
           }
@@ -201,6 +229,7 @@ export async function acquire(targets: Target[], options: Options = {}): Promise
             cached = { parkName: cached!.parkName, facilities }
             state.prepared.add(key)
             state.targets.set(key, cached)
+            await checkpoint(options, state, { kind: 'state' })
           }
           parkName = cached!.parkName
           const collected: Facility[] = []
@@ -216,6 +245,7 @@ export async function acquire(targets: Target[], options: Options = {}): Promise
               }),
               target.startDate,
             )
+            await checkpoint(options, state, { kind: 'state' })
             collected.push({ ...facility, week })
           }
           results.push({
@@ -233,7 +263,9 @@ export async function acquire(targets: Target[], options: Options = {}): Promise
           if (error instanceof AcquisitionError && error.kind === 'session-expired') {
             state.initialized = false
             state.prepared.clear()
+            state.targets.clear()
             await state.jar.removeAllCookies()
+            await checkpoint(options, state, { kind: 'state', reset: true })
             if (recovery === 0) continue
           }
           if (recovery === 1) {
@@ -247,6 +279,14 @@ export async function acquire(targets: Target[], options: Options = {}): Promise
         }
       }
     } catch (error) {
+      let failureReason = error
+      if (!state.checkpointFailed) {
+        try {
+          await checkpoint(options, state, { kind: 'state' })
+        } catch (failure) {
+          failureReason = failure
+        }
+      }
       // A failed target never carries an empty successful result or unvalidated partial data.
       results.push({
         target,
@@ -258,8 +298,8 @@ export async function acquire(targets: Target[], options: Options = {}): Promise
         state: 'failed',
         error: options.signal?.aborted
           ? 'interrupted'
-          : error instanceof AcquisitionError
-            ? error.kind
+          : failureReason instanceof AcquisitionError
+            ? failureReason.kind
             : 'invalid-response',
       })
     }
