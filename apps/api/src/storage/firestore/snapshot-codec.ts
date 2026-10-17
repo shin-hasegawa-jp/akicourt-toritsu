@@ -59,7 +59,10 @@ export const digest = (value: unknown) =>
         item && typeof item === 'object' && !Array.isArray(item)
           ? Object.fromEntries(
               Object.keys(item)
-                .sort()
+                .sort((left, right) => {
+                  if (left === right) return 0
+                  return left < right ? -1 : 1
+                })
                 .map((key) => [key, item[key]]),
             )
           : item,
