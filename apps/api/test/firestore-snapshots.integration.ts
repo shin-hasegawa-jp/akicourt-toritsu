@@ -8,7 +8,12 @@ import { ReferenceRepository } from '../src/storage/firestore/reference-data'
 import { firestoreSettings } from '../src/storage/firestore/database'
 import { SnapshotRepository } from '../src/storage/firestore/snapshots'
 import { FirestoreSearch } from '../src/storage/firestore/search'
-import { scopeId, limits } from '../src/storage/firestore/snapshot-codec'
+import {
+  scopeId,
+  limits,
+  encodeSnapshot,
+  measureDocument,
+} from '../src/storage/firestore/snapshot-codec'
 import { syntheticResult } from './firestore-fixtures'
 
 const projectId = 'demo-akicourt-local'
@@ -93,32 +98,30 @@ test(
         },
       )
       await t.test(
-        'interrupted staging is unpublished; incomplete or missing chunks fail explicitly',
+        'lost write responses and missing snapshots never replace the published result',
         async (t) => {
-          const original = db.batch.bind(db)
-          const interception = t.mock.method(db, 'batch', () => {
-            const batch = original()
-            const commit = batch.commit.bind(batch)
-            t.mock.method(batch, 'commit', async () => {
-              await commit()
-              throw new Error('simulated-response-loss')
-            })
-            return batch
+          const original = db.doc.bind(db)
+          const interception = t.mock.method(db, 'doc', (path: string) => {
+            const ref = original(path)
+            if (path.startsWith('snapshots/')) {
+              const create = ref.create.bind(ref)
+              t.mock.method(ref, 'create', async (data: FirebaseFirestore.DocumentData) => {
+                await create(data)
+                throw new Error('simulated-response-loss')
+              })
+            }
+            return ref
           })
           await assert.rejects(
             snapshots.stage(syntheticResult(target, 1)),
             /simulated-response-loss/,
           )
           interception.mock.restore()
-          const partial = (await db.collection('snapshots').where('complete', '==', false).get())
-            .docs[0]
-          assert.ok(partial)
-          await assert.rejects(publish(partial.id, target, 1), /incomplete-snapshot/)
           assert.equal((await search.search(input, now)).scopes[0].snapshotId, first)
           const staged = await snapshots.stage(syntheticResult(target, 1))
-          await db.doc(`snapshots/${staged.snapshotId}/chunks/0000`).delete()
+          assert.equal((await db.doc(`snapshots/${staged.snapshotId}`).listCollections()).length, 0)
+          await db.doc(`snapshots/${staged.snapshotId}`).delete()
           await assert.rejects(publish(staged.snapshotId, target, 1))
-          // Even a corrupt pointer never produces a partial success/empty result.
           await db.doc(`scopes/${scopeId(target)}`).update({ latestSnapshotId: staged.snapshotId })
           await assert.rejects(search.search(input, now), code('storage_unavailable'))
           await db.doc(`scopes/${scopeId(target)}`).update({ latestSnapshotId: first })
@@ -128,8 +131,7 @@ test(
         'generation compare-and-swap rejects an old publisher and reads are consistent',
         async () => {
           const next = await snapshots.stage(syntheticResult(target, 6000))
-          assert.ok(next.chunkCount > 1)
-          assert.ok(next.maxDocumentBytes < limits.documentBytes)
+          assert.ok(next.documentBytes < limits.documentBytes)
           const newJob = randomUUID()
           const [, reads] = await Promise.all([
             publish(next.snapshotId, target, 1, newJob),
@@ -189,14 +191,34 @@ test(
         async () => {
           const limited = new FirestoreSearch(db, projectId, undefined, 40000)
           await assert.rejects(limited.search(input, now), code('search_capacity_exceeded'))
+          const boundary = syntheticResult(target, 1)
+          boundary.facilities[0].name = 'x'.repeat(100000)
+          const path = `projects/${projectId}/databases/${db.databaseId}/documents/snapshots/${randomUUID()}`
+          const base = measureDocument(path, encodeSnapshot(boundary))
+          boundary.facilities[0].name += 'x'.repeat(
+            limits.documentBytes - Math.max(base.documentBytes, base.wireBytes),
+          )
+          const atLimit = await snapshots.stage(boundary)
+          assert.equal(Math.max(atLimit.documentBytes, atLimit.wireBytes), limits.documentBytes)
+          boundary.facilities[0].name += 'x'
+          await assert.rejects(snapshots.stage(boundary), /snapshot-capacity-exceeded/)
+          const before = (await db.collection('snapshots').get()).size
+          const scopeBefore = (await db.doc(`scopes/${scopeId(target)}`).get()).data()
+          await assert.rejects(
+            snapshots.stage(syntheticResult(target, 10000)),
+            /snapshot-capacity-exceeded/,
+          )
+          assert.equal((await db.collection('snapshots').get()).size, before)
+          assert.deepEqual((await db.doc(`scopes/${scopeId(target)}`).get()).data(), scopeBefore)
+          assert.equal((await search.search(input, now)).slots.length, 6000)
           const hugeTarget: Target = { parkId: '1010', surface: 'grass', startDate: '2026-10-12' }
           const tooBig = syntheticResult(hugeTarget, 1)
-          tooBig.facilities[0].name = 'あ'.repeat(200000)
+          tooBig.facilities[0].name = 'あ'.repeat(320000)
           await assert.rejects(snapshots.stage(tooBig), /snapshot-capacity-exceeded/)
           const big = syntheticResult(hugeTarget, 100)
           big.facilities[0].name = 'あ'.repeat(150000)
           const staged = await snapshots.stage(big)
-          assert.ok(staged.maxDocumentBytes < limits.documentBytes)
+          assert.ok(staged.documentBytes < limits.documentBytes)
           await publish(staged.snapshotId, hugeTarget)
           await assert.rejects(
             search.search({ ...input, targets: [{ parkId: '1010', surface: 'grass' }] }, now),

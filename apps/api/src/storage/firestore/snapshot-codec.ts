@@ -21,9 +21,7 @@ import { Result, Target } from '../../availability/client'
 import { offsetDate, validateDate } from '../../availability/parser'
 
 export const limits = {
-  chunkBytes: 256 * 1024,
-  documentBytes: 512 * 1024,
-  chunks: 64,
+  documentBytes: 900 * 1024,
   searchBytes: 32 * 1024 * 1024,
 }
 export type StoredSlot = {
@@ -33,23 +31,15 @@ export type StoredSlot = {
   end: string
   availableCourts: number
 }
-export type Chunk = {
-  schemaVersion: number
-  ordinal: number
-  payload: StoredSlot[]
-  checksum: string
-}
-export type Manifest = {
+export type Snapshot = {
   schemaVersion: number
   scopeId: string
   target: Target
   attemptedAt: Timestamp
   completedAt: Timestamp
   facilities: { id: string; name: string; checkedCells: number }[]
-  chunkIds: string[]
-  chunkChecksums: string[]
+  payload: StoredSlot[]
   slotCount: number
-  complete: boolean
   checksum: string
 }
 export const digest = (value: unknown) =>
@@ -137,16 +127,15 @@ export function measureDocument(name: string, data: Record<string, unknown>) {
     }).finish().length,
   }
 }
-export function manifestChecksum(manifest: Omit<Manifest, 'checksum'> | Manifest) {
+export function snapshotChecksum(snapshot: Omit<Snapshot, 'checksum'> | Snapshot) {
   return digest({
-    scopeId: manifest.scopeId,
-    target: manifest.target,
-    attemptedAt: manifest.attemptedAt.toMillis(),
-    completedAt: manifest.completedAt.toMillis(),
-    facilities: manifest.facilities,
-    chunkIds: manifest.chunkIds,
-    chunkChecksums: manifest.chunkChecksums,
-    slotCount: manifest.slotCount,
+    scopeId: snapshot.scopeId,
+    target: snapshot.target,
+    attemptedAt: snapshot.attemptedAt.toMillis(),
+    completedAt: snapshot.completedAt.toMillis(),
+    facilities: snapshot.facilities,
+    payload: snapshot.payload,
+    slotCount: snapshot.slotCount,
   })
 }
 export function encodeSnapshot(result: Extract<Result, { state: 'success' }>) {
@@ -188,25 +177,7 @@ export function encodeSnapshot(result: Extract<Result, { state: 'success' }>) {
       a.start.localeCompare(b.start) ||
       a.facilityId.localeCompare(b.facilityId),
   )
-  const chunks: Chunk[] = []
-  let payload: StoredSlot[] = []
-  let bytes = 2
-  const flush = () => {
-    if (payload.length)
-      chunks.push({ schemaVersion: 1, ordinal: chunks.length, payload, checksum: digest(payload) })
-    payload = []
-    bytes = 2
-    if (chunks.length > limits.chunks) throw new Error('snapshot-capacity-exceeded')
-  }
-  for (const row of rows) {
-    const size = jsonBytes(row)
-    if (size + 2 > limits.chunkBytes) throw new Error('snapshot-capacity-exceeded')
-    if (bytes + size + (payload.length ? 1 : 0) > limits.chunkBytes) flush()
-    bytes += size + (payload.length ? 1 : 0)
-    payload.push(row)
-  }
-  flush()
-  const manifest: Manifest = {
+  const snapshot: Snapshot = {
     schemaVersion: 1,
     scopeId: id,
     target: {
@@ -221,18 +192,16 @@ export function encodeSnapshot(result: Extract<Result, { state: 'success' }>) {
       name: f.name,
       checkedCells: f.week.checkedCells,
     })),
-    chunkIds: chunks.map((c) => String(c.ordinal).padStart(4, '0')),
-    chunkChecksums: chunks.map((c) => c.checksum),
+    payload: rows,
     slotCount: rows.length,
-    complete: false,
     checksum: '',
   }
-  if (manifest.attemptedAt.toMillis() > manifest.completedAt.toMillis()) return fail()
-  manifest.checksum = manifestChecksum(manifest)
-  return { manifest, chunks }
+  if (snapshot.attemptedAt.toMillis() > snapshot.completedAt.toMillis()) return fail()
+  snapshot.checksum = snapshotChecksum(snapshot)
+  return snapshot
 }
-export function verifyManifest(value: unknown, target: Target): Manifest {
-  const m = value as Manifest
+export function verifySnapshot(value: unknown, target: Target): Snapshot {
+  const m = value as Snapshot
   if (
     !m ||
     m.schemaVersion !== 1 ||
@@ -252,46 +221,20 @@ export function verifyManifest(value: unknown, target: Target): Manifest {
         f.checkedCells < 1,
     ) ||
     new Set(m.facilities.map((f) => f.id)).size !== m.facilities.length ||
-    !Array.isArray(m.chunkIds) ||
-    m.chunkIds.length > limits.chunks ||
-    m.chunkIds.some((s, i) => s !== String(i).padStart(4, '0')) ||
-    !Array.isArray(m.chunkChecksums) ||
-    m.chunkChecksums.length !== m.chunkIds.length ||
-    m.chunkChecksums.some((s) => typeof s !== 'string' || !/^[a-f0-9]{64}$/.test(s)) ||
+    !Array.isArray(m.payload) ||
     !Number.isSafeInteger(m.slotCount) ||
     m.slotCount < 0 ||
-    typeof m.complete !== 'boolean' ||
-    manifestChecksum(m) !== m.checksum
+    snapshotChecksum(m) !== m.checksum
   )
     return fail()
-  return m
-}
-export function verifyChunks(manifest: Manifest, values: unknown[]): StoredSlot[] {
-  if (values.length !== manifest.chunkIds.length) return fail()
-  const result: StoredSlot[] = []
   const unique = new Set<string>()
-  const facilityIds = new Set(manifest.facilities.map((f) => f.id))
-  values.forEach((value, i) => {
-    const chunk = value as Chunk
-    if (
-      !chunk ||
-      chunk.schemaVersion !== 1 ||
-      chunk.ordinal !== i ||
-      !Array.isArray(chunk.payload) ||
-      !chunk.payload.length ||
-      jsonBytes(chunk.payload) > limits.chunkBytes ||
-      digest(chunk.payload) !== chunk.checksum ||
-      chunk.checksum !== manifest.chunkChecksums[i]
-    )
+  const facilityIds = new Set(m.facilities.map((f) => f.id))
+  for (const row of m.payload) {
+    const key = `${row.facilityId}/${row.date}/${row.start}/${row.end}`
+    if (!validSlot(row, target) || !facilityIds.has(row.facilityId) || unique.has(key))
       return fail()
-    for (const row of chunk.payload) {
-      const key = `${row.facilityId}/${row.date}/${row.start}/${row.end}`
-      if (!validSlot(row, manifest.target) || !facilityIds.has(row.facilityId) || unique.has(key))
-        return fail()
-      unique.add(key)
-      result.push(row)
-    }
-  })
-  if (result.length !== manifest.slotCount) return fail()
-  return result
+    unique.add(key)
+  }
+  if (m.payload.length !== m.slotCount) return fail()
+  return m
 }

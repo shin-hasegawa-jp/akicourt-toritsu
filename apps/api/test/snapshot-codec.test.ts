@@ -4,28 +4,24 @@ import { Target } from '../src/availability/client'
 import { syntheticResult } from './firestore-fixtures'
 import {
   encodeSnapshot,
-  jsonBytes,
-  limits,
   measureDocument,
-  verifyChunks,
+  verifySnapshot,
 } from '../src/storage/firestore/snapshot-codec'
 
 const target: Target = { parkId: '1280', surface: 'grass', startDate: '2026-10-12' }
 
-test('snapshot chunks split before 256KiB and detect missing or changed content', () => {
-  const { manifest, chunks } = encodeSnapshot(syntheticResult(target, 6000))
-  assert.ok(chunks.length > 1)
-  assert.ok(chunks.every((c) => jsonBytes(c.payload) <= limits.chunkBytes))
-  assert.equal(verifyChunks(manifest, chunks).length, 6000)
-  const reordered = chunks.map((c) => ({
-    ...c,
-    payload: c.payload.map((row) => Object.fromEntries(Object.entries(row).reverse())),
-  }))
-  assert.equal(verifyChunks(manifest, reordered).length, 6000)
-  assert.throws(() => verifyChunks(manifest, chunks.slice(1)))
-  const broken = structuredClone(chunks)
-  broken[0].payload[0].availableCourts++
-  assert.throws(() => verifyChunks(manifest, broken))
+test('single snapshots round-trip and reject missing or changed slots', () => {
+  const snapshot = encodeSnapshot(syntheticResult(target, 6000))
+  assert.equal(verifySnapshot(snapshot, target).payload.length, 6000)
+  const reordered = {
+    ...snapshot,
+    payload: snapshot.payload.map((row) => Object.fromEntries(Object.entries(row).reverse())),
+  }
+  assert.equal(verifySnapshot(reordered, target).payload.length, 6000)
+  assert.throws(() => verifySnapshot({ ...snapshot, payload: snapshot.payload.slice(1) }, target))
+  const broken = { ...snapshot, payload: snapshot.payload.map((row) => ({ ...row })) }
+  broken.payload[0].availableCourts++
+  assert.throws(() => verifySnapshot(broken, target))
 })
 
 test('snapshot storage size follows Firestore formula; protobuf size is measured separately', () => {

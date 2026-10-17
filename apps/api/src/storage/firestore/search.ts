@@ -72,15 +72,13 @@ export class FirestoreSearch {
       const result = await this.db.runTransaction(
         async (tx) => {
           statistics = { documentReads: 0, wireBytes: 0 }
-          let chunks = 0
           const observe = (document: DocumentSnapshot) => {
             statistics.documentReads++
             statistics.wireBytes += measureDocument(
               `projects/${this.projectId}/databases/${this.db.databaseId}/documents/${document.ref.path}`,
               document.data() ?? {},
             ).wireBytes
-            if (document.ref.path.includes('/chunks/')) chunks++
-            if (chunks > 640 || statistics.wireBytes > this.maxReadBytes) throw capacity()
+            if (statistics.wireBytes > this.maxReadBytes) throw capacity()
           }
           const reference = await new ReferenceRepository(this.db).read(tx, observe)
           const holidays = new Set(reference.years.flatMap((y) => y.holidays.map((h) => h.date)))
@@ -155,14 +153,14 @@ export class FirestoreSearch {
             const snapshotId = scope?.latestSnapshotId ?? null
             let lastSuccessAt: string | null = null
             if (snapshotId) {
-              const stored = await snapshots.read(tx, snapshotId, target, true, observe)
+              const stored = await snapshots.read(tx, snapshotId, target, observe)
               if (
                 !(scope?.observedAt instanceof Timestamp) ||
-                !scope.observedAt.isEqual(stored.manifest.completedAt)
+                !scope.observedAt.isEqual(stored.snapshot.completedAt)
               )
                 throw unavailable()
-              lastSuccessAt = stored.manifest.completedAt.toDate().toISOString()
-              const facilities = new Map(stored.manifest.facilities.map((f) => [f.id, f]))
+              lastSuccessAt = stored.snapshot.completedAt.toDate().toISOString()
+              const facilities = new Map(stored.snapshot.facilities.map((f) => [f.id, f]))
               for (const slot of stored.slots) {
                 const weekday = new Date(`${slot.date}T00:00:00Z`).getUTCDay()
                 if (

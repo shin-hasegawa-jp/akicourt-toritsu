@@ -7,8 +7,7 @@ import {
   measureDocument,
   scopeId,
   validId,
-  verifyChunks,
-  verifyManifest,
+  verifySnapshot,
 } from './snapshot-codec'
 
 export class SnapshotRepository {
@@ -22,78 +21,32 @@ export class SnapshotRepository {
   async stage(result: Extract<Result, { state: 'success' }>) {
     const snapshotId = randomUUID()
     const ref = this.db.doc(`snapshots/${snapshotId}`)
-    const { manifest, chunks } = encodeSnapshot(result)
-    const documents = [
-      { path: ref.path, data: manifest },
-      ...chunks.map((data, i) => ({ path: `${ref.path}/chunks/${manifest.chunkIds[i]}`, data })),
-    ]
-    const sizes = documents.map(({ path, data }) => measureDocument(this.name(path), data))
-    if (
-      sizes.some(
-        (s) => s.documentBytes > limits.documentBytes || s.wireBytes > limits.documentBytes,
-      )
-    )
+    const snapshot = encodeSnapshot(result)
+    const sizes = this.checkSize(ref.path, snapshot)
+    await ref.create(snapshot)
+    return { snapshotId, slotCount: snapshot.slotCount, ...sizes }
+  }
+
+  private checkSize(path: string, data: Record<string, unknown>) {
+    const sizes = measureDocument(this.name(path), data)
+    if (sizes.documentBytes > limits.documentBytes || sizes.wireBytes > limits.documentBytes)
       throw new Error('snapshot-capacity-exceeded')
-    await ref.create(manifest)
-    // Keep each Commit comfortably below the 10MiB API request limit.
-    for (let start = 0; start < chunks.length; start += 16) {
-      const batch = this.db.batch()
-      chunks
-        .slice(start, start + 16)
-        .forEach((chunk, i) =>
-          batch.create(ref.collection('chunks').doc(manifest.chunkIds[start + i]), chunk),
-        )
-      await batch.commit()
-    }
-    await this.db.runTransaction(
-      async (tx) => {
-        await this.read(tx, snapshotId, result.target, false)
-        tx.update(ref, { complete: true })
-      },
-      { maxAttempts: 3 },
-    )
-    return {
-      snapshotId,
-      chunkCount: chunks.length,
-      slotCount: manifest.slotCount,
-      maxDocumentBytes: Math.max(...sizes.map((s) => s.documentBytes)),
-      wireBytes: sizes.reduce((n, s) => n + s.wireBytes, 0),
-    }
+    return sizes
   }
 
   async read(
     tx: Transaction,
     snapshotId: string,
     target: Target,
-    requireComplete = true,
     observe?: (document: DocumentSnapshot) => void,
   ) {
     if (!validId(snapshotId)) throw new Error('invalid-snapshot-id')
     const ref = this.db.doc(`snapshots/${snapshotId}`)
     const document = await tx.get(ref)
     observe?.(document)
-    const manifest = verifyManifest(document.data(), target)
-    if (requireComplete && !manifest.complete) throw new Error('incomplete-snapshot')
-    const chunkDocuments = manifest.chunkIds.length
-      ? await tx.getAll(...manifest.chunkIds.map((id) => ref.collection('chunks').doc(id)))
-      : []
-    for (const document of chunkDocuments) observe?.(document)
-    const slots = verifyChunks(
-      manifest,
-      chunkDocuments.map((d) => d.data()),
-    )
-    const documents = [
-      { path: ref.path, data: manifest },
-      ...chunkDocuments.map((d) => ({ path: d.ref.path, data: d.data()! })),
-    ]
-    const sizes = documents.map(({ path, data }) => measureDocument(this.name(path), data))
-    if (
-      sizes.some(
-        (s) => s.documentBytes > limits.documentBytes || s.wireBytes > limits.documentBytes,
-      )
-    )
-      throw new Error('snapshot-capacity-exceeded')
-    return { manifest, slots, wireBytes: sizes.reduce((n, s) => n + s.wireBytes, 0) }
+    const snapshot = verifySnapshot(document.data(), target)
+    const sizes = this.checkSize(ref.path, snapshot)
+    return { snapshot, slots: snapshot.payload, wireBytes: sizes.wireBytes }
   }
 
   // Low-level publication primitive. The acquisition worker must check owner/fence,
@@ -105,7 +58,7 @@ export class SnapshotRepository {
     const id = scopeId(target)
     const ref = this.db.doc(`scopes/${id}`)
     const current = (await tx.get(ref)).data()
-    const { manifest } = await this.read(tx, snapshotId, target)
+    const { snapshot } = await this.read(tx, snapshotId, target)
     if (
       current &&
       (current.schemaVersion !== 1 ||
@@ -130,7 +83,7 @@ export class SnapshotRepository {
         latestSnapshotId: snapshotId,
         previousSnapshotId: current?.latestSnapshotId ?? null,
         publicationGeneration: expectedGeneration + 1,
-        observedAt: manifest.completedAt,
+        observedAt: snapshot.completedAt,
       },
       { merge: true },
     )
