@@ -32,7 +32,7 @@ test('Cloud Tasks contract has stable hashed name, minimal body, OIDC and 900s d
     'https://user:pass@worker.example.com',
     'https://worker.example.com?x=1',
   ])
-    assert.throws(() => taskRequest({ ...config, workerUrl }, job))
+    assert.throws(() => new CloudTaskDispatcher({ ...config, workerUrl }))
   const calls: unknown[] = []
   const client = {
     createTask: async (...args: unknown[]) => {

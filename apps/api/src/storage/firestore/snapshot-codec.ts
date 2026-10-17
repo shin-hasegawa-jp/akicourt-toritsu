@@ -1,3 +1,6 @@
+import * as v from 'valibot'
+import { Id, TargetSchema, parseValue } from '../../validation'
+import { SnapshotSchema, SnapshotFacilitySchema, StoredSlotSchema } from './schemas'
 import { createHash } from 'node:crypto'
 import { Timestamp } from '@google-cloud/firestore'
 // The pinned SDK exposes the protobuf encoder at runtime but not in its TS declarations.
@@ -24,24 +27,8 @@ export const limits = {
   documentBytes: 900 * 1024,
   searchBytes: 32 * 1024 * 1024,
 }
-export type StoredSlot = {
-  facilityId: string
-  date: string
-  start: string
-  end: string
-  availableCourts: number
-}
-export type Snapshot = {
-  schemaVersion: number
-  scopeId: string
-  target: Target
-  attemptedAt: Timestamp
-  completedAt: Timestamp
-  facilities: { id: string; name: string; checkedCells: number }[]
-  payload: StoredSlot[]
-  slotCount: number
-  checksum: string
-}
+export type StoredSlot = v.InferOutput<typeof StoredSlotSchema>
+export type Snapshot = v.InferOutput<typeof SnapshotSchema>
 export const digest = (value: unknown) =>
   createHash('sha256')
     .update(
@@ -60,31 +47,24 @@ export const digest = (value: unknown) =>
     )
     .digest('hex')
 export const jsonBytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value))
-export const validId = (value: unknown): value is string =>
-  typeof value === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(value)
+export const validId = (value: unknown): value is string => v.is(Id, value)
 const fail = (): never => {
   throw new Error('invalid-snapshot')
 }
 export function scopeId(target: Target) {
   if (
-    !/^\d{4}$/.test(target.parkId) ||
-    !['grass', 'hard'].includes(target.surface) ||
+    !v.is(TargetSchema, target) ||
     new Date(`${validateDate(target.startDate)}T00:00:00Z`).getUTCDay() !== 1
   )
     return fail()
   return `${target.parkId}_${target.surface}_${target.startDate}`
 }
 export function validSlot(slot: StoredSlot, target: Target) {
-  const clock = /^(?:[01]\d|2[0-3]):[0-5]\d$/
   return (
-    validId(slot.facilityId) &&
-    validateDate(slot.date) >= target.startDate &&
+    v.is(StoredSlotSchema, slot) &&
+    slot.date >= target.startDate &&
     slot.date <= offsetDate(target.startDate, 6) &&
-    clock.test(slot.start) &&
-    clock.test(slot.end) &&
-    slot.start < slot.end &&
-    Number.isSafeInteger(slot.availableCourts) &&
-    slot.availableCourts > 0
+    slot.start < slot.end
   )
 }
 // Official storage-size formula, distinct from UTF-8 JSON and protobuf wire size.
@@ -127,7 +107,7 @@ export function measureDocument(name: string, data: Record<string, unknown>) {
     }).finish().length,
   }
 }
-export function snapshotChecksum(snapshot: Omit<Snapshot, 'checksum'> | Snapshot) {
+export function snapshotChecksum(snapshot: Snapshot) {
   return digest({
     scopeId: snapshot.scopeId,
     target: snapshot.target,
@@ -150,10 +130,11 @@ export function encodeSnapshot(result: Extract<Result, { state: 'success' }>) {
   const unique = new Set<string>()
   for (const facility of result.facilities) {
     if (
-      !validId(facility.id) ||
-      !facility.name.trim() ||
-      !Number.isSafeInteger(facility.week.checkedCells) ||
-      facility.week.checkedCells < 1 ||
+      !v.is(SnapshotFacilitySchema, {
+        id: facility.id,
+        name: facility.name,
+        checkedCells: facility.week.checkedCells,
+      }) ||
       facility.week.days.join(',') !== expectedDays.join(',')
     )
       return fail()
@@ -201,29 +182,12 @@ export function encodeSnapshot(result: Extract<Result, { state: 'success' }>) {
   return snapshot
 }
 export function verifySnapshot(value: unknown, target: Target): Snapshot {
-  const m = value as Snapshot
+  const m = parseValue(SnapshotSchema, value, () => new Error('invalid-snapshot'))
   if (
-    !m ||
-    m.schemaVersion !== 1 ||
     m.scopeId !== scopeId(target) ||
     scopeId(m.target) !== m.scopeId ||
-    !(m.attemptedAt instanceof Timestamp) ||
-    !(m.completedAt instanceof Timestamp) ||
     m.attemptedAt.toMillis() > m.completedAt.toMillis() ||
-    !Array.isArray(m.facilities) ||
-    !m.facilities.length ||
-    m.facilities.some(
-      (f) =>
-        !validId(f.id) ||
-        typeof f.name !== 'string' ||
-        !f.name.trim() ||
-        !Number.isSafeInteger(f.checkedCells) ||
-        f.checkedCells < 1,
-    ) ||
     new Set(m.facilities.map((f) => f.id)).size !== m.facilities.length ||
-    !Array.isArray(m.payload) ||
-    !Number.isSafeInteger(m.slotCount) ||
-    m.slotCount < 0 ||
     snapshotChecksum(m) !== m.checksum
   )
     return fail()

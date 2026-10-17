@@ -1,10 +1,21 @@
+import * as v from 'valibot'
+import { parseValue } from '../../validation'
+import {
+  ControlSchema,
+  QueueSchema,
+  SessionDocumentSchema,
+  ParkSchema,
+  ReferenceSchema,
+  ParkDocumentSchema,
+  HolidayDocumentSchema,
+} from './schemas'
 import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import { DocumentSnapshot, Firestore, Timestamp, Transaction } from '@google-cloud/firestore'
 import { CookieJar } from 'tough-cookie'
 import parks from '../park-options'
 import calendar from '../holiday-calendar'
-import { HOLIDAY_SOURCE, validateCalendar } from '../holidays'
+import { HOLIDAY_SOURCE, validateCalendarData, CalendarSchema } from '../holidays'
 
 export type Park = { parkId: string; surface: 'grass' | 'hard'; name: string }
 type ReferenceSource = { parks: readonly Park[]; calendar: unknown; years: number[] }
@@ -14,26 +25,26 @@ const bundled: ReferenceSource = {
   years: calendar.years.map((entry) => entry.year),
 }
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
-const schema = (value: Record<string, unknown> | undefined) => value?.schemaVersion === 1
-const integer = (value: unknown) => Number.isSafeInteger(value) && Number(value) >= 0
 
 function referenceBundle(source: ReferenceSource) {
-  if (
-    !source.parks.length ||
-    source.parks.length > 100 ||
-    new Set(source.parks.map((p) => `${p.parkId}_${p.surface}`)).size !== source.parks.length ||
-    source.parks.some(
-      (p) =>
-        !/^\d{4}$/.test(p.parkId) ||
-        !['grass', 'hard'].includes(p.surface) ||
-        typeof p.name !== 'string' ||
-        !p.name.trim(),
-    )
+  const parks = parseValue(
+    v.pipe(
+      v.array(ParkSchema),
+      v.minLength(1),
+      v.maxLength(100),
+      v.check((ps) => new Set(ps.map((p) => `${p.parkId}_${p.surface}`)).size === ps.length),
+    ),
+    source.parks,
+    () => new Error('invalid-park-catalog'),
   )
-    throw new Error('invalid-park-catalog')
-  const years = validateCalendar(source.calendar, source.years)
-  const verifiedAt = (source.calendar as { verifiedAt: string }).verifiedAt
-  const normalized = source.parks.map((p, officialOrder) => ({
+  const calendar = parseValue(
+    CalendarSchema,
+    source.calendar,
+    () => new Error('invalid-holiday-calendar'),
+  )
+  const years = validateCalendarData(calendar, source.years)
+  const verifiedAt = calendar.verifiedAt
+  const normalized = parks.map((p, officialOrder) => ({
     schemaVersion: 1,
     parkId: p.parkId,
     surface: p.surface,
@@ -83,30 +94,10 @@ export class ReferenceRepository {
         throw new Error('inconsistent-initialization')
       return { refs, empty: true as const }
     }
-    const [control, queue, session] = docs.map((d) => d.data())
-    if (
-      !docs.every((d) => d.exists && schema(d.data())) ||
-      !control ||
-      !queue ||
-      !session ||
-      typeof control?.updatesEnabled !== 'boolean' ||
-      !(control.blockedReason === null || typeof control.blockedReason === 'string') ||
-      !(control.owner === null || typeof control.owner === 'string') ||
-      !(control.leaseUntil === null || control.leaseUntil instanceof Timestamp) ||
-      !(control.nextRequestNotBefore instanceof Timestamp) ||
-      !integer(control.fence) ||
-      !integer(control.recoveryGeneration) ||
-      !integer(queue?.pendingJobCount) ||
-      !integer(session?.sessionGeneration) ||
-      !integer(session?.revision) ||
-      typeof session?.initialized !== 'boolean' ||
-      !Array.isArray(session.prepared) ||
-      !Array.isArray(session.targets) ||
-      !['usable', 'recovery_required', 'disabled'].includes(session.restorationState) ||
-      !(session.lastUsedAt === null || session.lastUsedAt instanceof Timestamp) ||
-      !session.cookieJar
-    )
-      throw new Error('inconsistent-initialization')
+    const invalid = () => new Error('inconsistent-initialization')
+    const control = parseValue(ControlSchema, docs[0].data(), invalid)
+    const queue = parseValue(QueueSchema, docs[1].data(), invalid)
+    const session = parseValue(SessionDocumentSchema, docs[2].data(), invalid)
     CookieJar.deserializeSync(session.cookieJar)
     return { refs, empty: false as const, control, queue, session }
   }
@@ -205,20 +196,33 @@ export class ReferenceRepository {
     const action = async (tx: Transaction) => {
       const manifestDocument = await tx.get(this.db.doc('control/referenceData'))
       observe?.(manifestDocument)
-      const manifest = manifestDocument.data()
-      if (!manifest) throw new Error('reference-data-not-initialized')
+      const rawManifest = manifestDocument.data()
+      if (!rawManifest) throw new Error('reference-data-not-initialized')
+      const manifest = parseValue(
+        ReferenceSchema,
+        rawManifest,
+        () => new Error('inconsistent-reference-data'),
+      )
       const parkRows = await tx.get(this.db.collection('parkSurfaces'))
       const holidayRows = await tx.get(this.db.collection('holidayYears'))
       for (const document of [...parkRows.docs, ...holidayRows.docs]) observe?.(document)
-      if (!schema(manifest) || !Array.isArray(manifest.parkIds) || !Array.isArray(manifest.years))
-        throw new Error('inconsistent-reference-data')
       const active = parkRows.docs
         .filter((p) => p.data().enabled === true)
-        .map((p) => p.data())
+        .map((p) =>
+          parseValue(ParkDocumentSchema, p.data(), () => new Error('inconsistent-reference-data')),
+        )
         .sort((a, b) => a.officialOrder - b.officialOrder)
-      const years = holidayRows.docs.map((y) => y.data()).sort((a, b) => a.year - b.year)
+      const years = holidayRows.docs
+        .map((y) =>
+          parseValue(
+            HolidayDocumentSchema,
+            y.data(),
+            () => new Error('inconsistent-reference-data'),
+          ),
+        )
+        .sort((a, b) => a.year - b.year)
       const bundle = referenceBundle({
-        parks: active as Park[],
+        parks: active,
         years: manifest.years,
         calendar: {
           source: years[0]?.source,
@@ -241,7 +245,7 @@ export class ReferenceRepository {
         throw new Error('inconsistent-reference-data')
       return {
         version: bundle.manifest.activeVersion,
-        parks: active as typeof bundle.parkDocuments,
+        parks: active,
         years: bundle.holidayDocuments,
       }
     }

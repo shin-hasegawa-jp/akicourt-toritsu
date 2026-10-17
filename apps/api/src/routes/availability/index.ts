@@ -1,3 +1,5 @@
+import * as v from 'valibot'
+import { parseValue } from '../../validation'
 import { FastifyPluginAsync } from 'fastify'
 import { Pool } from 'pg'
 import parks from '../../storage/park-options'
@@ -6,6 +8,7 @@ import { AvailabilityService } from '../../availability-api/service'
 import {
   ApiError,
   Input,
+  InputSchema,
   bodySchema,
   commonProperties,
   searchProperties,
@@ -57,29 +60,18 @@ const routes: FastifyPluginAsync<{ pool?: Pool }> = async (app, opts) => {
     })),
   }))
 
-  // Fastify's default AJV removes additional fields. Reject them before validation
-  // so a misspelled date/filter cannot silently broaden a search or update.
-  const rejectUnknown = (properties: object) => async (request: { body: unknown }) => {
-    const body = request.body
-    if (!body || typeof body !== 'object' || Array.isArray(body)) return
-    if (Object.keys(body).some((key) => !(key in properties)))
-      throw new ApiError(400, 'invalid_request', '未対応の入力項目があります。')
-    const targets = (body as Input).targets
-    if (
-      Array.isArray(targets) &&
-      targets.some(
-        (t) =>
-          t &&
-          typeof t === 'object' &&
-          Object.keys(t).some((k) => !['parkId', 'surface'].includes(k)),
-      )
+  // Validate before AJV can coerce values or strip unknown fields.
+  const validateBody = (schema: v.GenericSchema) => async (request: { body: unknown }) => {
+    request.body = parseValue(
+      schema,
+      request.body,
+      () => new ApiError(400, 'invalid_request', '入力内容を確認してください。'),
     )
-      throw new ApiError(400, 'invalid_request', '未対応の対象項目があります。')
   }
   app.post<{ Body: Input }>(
     '/search',
     {
-      preValidation: rejectUnknown(searchProperties),
+      preValidation: validateBody(InputSchema),
       schema: { body: bodySchema(searchProperties), response: { 200: searchSchema, ...errors } },
     },
     async (request) => {
@@ -90,7 +82,7 @@ const routes: FastifyPluginAsync<{ pool?: Pool }> = async (app, opts) => {
   app.post<{ Body: Input }>(
     '/updates',
     {
-      preValidation: rejectUnknown(commonProperties),
+      preValidation: validateBody(v.pick(InputSchema, ['targets', 'dateFrom', 'dateTo'])),
       schema: {
         body: bodySchema(commonProperties),
         response: { 200: updateSchema, 202: updateSchema, ...errors },

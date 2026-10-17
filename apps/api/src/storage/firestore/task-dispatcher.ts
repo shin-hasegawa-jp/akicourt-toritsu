@@ -1,32 +1,37 @@
+import * as v from 'valibot'
+import { ProjectId, parseValue } from '../../validation'
 import { createHash } from 'node:crypto'
 import { CloudTasksClient, protos } from '@google-cloud/tasks'
 import { DispatchJob } from './jobs'
 
-export type TaskConfig = {
-  projectId: string
-  location: string
-  queue: string
-  callerSA: string
-  workerUrl: string
-}
+const WorkerUrl = v.pipe(
+  v.string(),
+  v.url(),
+  v.check((value) => {
+    const url = new URL(value)
+    return (
+      url.protocol === 'https:' &&
+      url.pathname === '/' &&
+      !url.search &&
+      !url.hash &&
+      !url.username &&
+      !url.password
+    )
+  }),
+)
+const TaskConfigSchema = v.object({
+  projectId: ProjectId,
+  location: v.pipe(v.string(), v.regex(/^[a-z][a-z0-9-]+$/)),
+  queue: v.pipe(v.string(), v.regex(/^[a-zA-Z0-9_-]{1,100}$/)),
+  callerSA: v.pipe(
+    v.string(),
+    v.regex(/^[a-zA-Z0-9-]+@[a-z][a-z0-9-]+\.iam\.gserviceaccount\.com$/),
+  ),
+  workerUrl: WorkerUrl,
+})
+export type TaskConfig = v.InferOutput<typeof TaskConfigSchema>
 export function taskRequest(config: TaskConfig, job: DispatchJob) {
   const url = new URL(config.workerUrl)
-  if (
-    !/^[a-z][a-z0-9-]{4,61}[a-z0-9]$/.test(config.projectId) ||
-    !/^[a-z][a-z0-9-]+$/.test(config.location) ||
-    !/^[a-zA-Z0-9_-]{1,100}$/.test(config.queue) ||
-    !/^[a-zA-Z0-9-]+@[a-z][a-z0-9-]+\.iam\.gserviceaccount\.com$/.test(config.callerSA) ||
-    url.protocol !== 'https:' ||
-    url.pathname !== '/' ||
-    url.search ||
-    url.hash ||
-    url.username ||
-    url.password ||
-    !/^[a-zA-Z0-9_-]{1,128}$/.test(job.jobId) ||
-    !Number.isSafeInteger(job.generation) ||
-    job.generation < 0
-  )
-    throw new Error('invalid-task-config')
   const parent = `projects/${config.projectId}/locations/${config.location}/queues/${config.queue}`
   const id = createHash('sha256').update(`${job.jobId}/${job.generation}`).digest('hex')
   return {
@@ -52,7 +57,7 @@ export class CloudTaskDispatcher implements Dispatcher {
     private readonly config: TaskConfig,
     private readonly client = new CloudTasksClient(),
   ) {
-    taskRequest(config, { jobId: 'validation', generation: 1 })
+    this.config = parseValue(TaskConfigSchema, config, () => new Error('invalid-task-config'))
   }
   async submit(job: DispatchJob, timeoutMs: number) {
     try {

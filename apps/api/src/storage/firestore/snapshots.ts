@@ -1,3 +1,6 @@
+import * as v from 'valibot'
+import { NonNegativeInteger, parseValue } from '../../validation'
+import { ScopeSchema } from './schemas'
 import { randomUUID } from 'node:crypto'
 import { DocumentSnapshot, Firestore, Transaction } from '@google-cloud/firestore'
 import { Result, Target } from '../../availability/client'
@@ -53,19 +56,17 @@ export class SnapshotRepository {
   // then call this inside the SAME transaction that finalizes its job and counters.
   // There is intentionally no route or management CLI exposing publication.
   async publish(tx: Transaction, snapshotId: string, target: Target, expectedGeneration: number) {
-    if (!Number.isSafeInteger(expectedGeneration) || expectedGeneration < 0)
-      throw new Error('invalid-generation')
+    if (!v.is(NonNegativeInteger, expectedGeneration)) throw new Error('invalid-generation')
     const id = scopeId(target)
     const ref = this.db.doc(`scopes/${id}`)
-    const current = (await tx.get(ref)).data()
+    const document = await tx.get(ref)
+    const current = document.exists
+      ? parseValue(ScopeSchema, document.data(), () => new Error('invalid-scope'))
+      : undefined
     const { snapshot } = await this.read(tx, snapshotId, target)
     if (
       current &&
-      (current.schemaVersion !== 1 ||
-        !Number.isSafeInteger(current.publicationGeneration) ||
-        current.publicationGeneration < 0 ||
-        (current.latestSnapshotId !== null && !validId(current.latestSnapshotId)) ||
-        current.parkId !== target.parkId ||
+      (current.parkId !== target.parkId ||
         current.surface !== target.surface ||
         current.weekStart !== target.startDate)
     )

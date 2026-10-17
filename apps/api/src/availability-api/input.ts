@@ -1,4 +1,5 @@
-import { Target } from '../availability/client'
+import * as v from 'valibot'
+import { DateString, Clock, NonNegativeInteger, ParkId, Surface } from '../validation'
 import { offsetDate, validateDate } from '../availability/parser'
 import { japanToday, scopes } from '../storage/scopes'
 
@@ -11,16 +12,28 @@ export class ApiError extends Error {
     super(message)
   }
 }
-export type Input = {
-  targets: Omit<Target, 'startDate'>[]
-  dateFrom?: string
-  dateTo?: string
-  weekdays?: number[]
-  includeHolidays?: boolean
-  timeFrom?: string
-  timeTo?: string
-  minDurationMinutes?: number
-}
+export const InputSchema = v.strictObject({
+  targets: v.pipe(
+    v.array(v.strictObject({ parkId: ParkId, surface: Surface })),
+    v.minLength(1),
+    v.maxLength(5),
+    v.check((ts) => new Set(ts.map((t) => `${t.parkId}/${t.surface}`)).size === ts.length),
+  ),
+  dateFrom: v.optional(DateString),
+  dateTo: v.optional(DateString),
+  weekdays: v.optional(
+    v.pipe(
+      v.array(v.pipe(NonNegativeInteger, v.maxValue(6))),
+      v.maxLength(7),
+      v.check((ds) => new Set(ds).size === ds.length),
+    ),
+  ),
+  includeHolidays: v.optional(v.boolean()),
+  timeFrom: v.optional(Clock),
+  timeTo: v.optional(v.union([Clock, v.literal('24:00')])),
+  minDurationMinutes: v.optional(v.pipe(NonNegativeInteger, v.maxValue(1440))),
+})
+export type Input = v.InferOutput<typeof InputSchema>
 export function resolveInput(input: Input, update = false) {
   try {
     if ((input.dateFrom === undefined) !== (input.dateTo === undefined)) throw new Error()
@@ -94,7 +107,7 @@ export const searchProperties = {
   timeTo: { type: 'string', pattern: '^(?:(?:[01]\\d|2[0-3]):[0-5]\\d|24:00)$' },
   minDurationMinutes: { type: 'integer', minimum: 1, maximum: 1440 },
 }
-export const bodySchema = (properties: object) => ({
+export const bodySchema = (properties: typeof commonProperties | typeof searchProperties) => ({
   type: 'object',
   additionalProperties: false,
   required: ['targets'],

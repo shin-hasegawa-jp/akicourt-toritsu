@@ -1,3 +1,5 @@
+import * as v from 'valibot'
+import { ProjectId } from '../../validation'
 import { Firestore, Settings } from '@google-cloud/firestore'
 
 export type Connection = { projectId: string; databaseId: string }
@@ -7,8 +9,7 @@ export function firestoreSettings(
   connection: Connection,
   environment: NodeJS.ProcessEnv = process.env,
 ): Settings {
-  if (!/^[a-z][a-z0-9-]{4,61}[a-z0-9]$/.test(connection.projectId))
-    throw new Error('invalid-project')
+  if (!v.is(ProjectId, connection.projectId)) throw new Error('invalid-project')
   if (connection.databaseId !== '(default)') throw new Error('unsupported-database')
   const host = environment.FIRESTORE_EMULATOR_HOST
   if (environment.NODE_ENV === 'production') {

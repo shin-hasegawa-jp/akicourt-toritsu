@@ -1,3 +1,15 @@
+import * as v from 'valibot'
+import { NonNegativeInteger, PositiveInteger, parseValue } from '../../validation'
+import {
+  ControlSchema,
+  QueueSchema,
+  UsageSchema,
+  AdmissionJobSchema,
+  AdmissionScopeSchema,
+  ReservationSchema,
+  DispatchSchema,
+  ParkDocumentSchema,
+} from './schemas'
 import { randomUUID } from 'node:crypto'
 import { Firestore, Timestamp, Transaction } from '@google-cloud/firestore'
 import { Target } from '../../availability/client'
@@ -14,8 +26,6 @@ export class AdmissionError extends ApiError {
     super(429, code, '更新の受付上限に達しています。時間をおいて再試行してください。')
   }
 }
-const integer = (value: unknown): value is number =>
-  Number.isSafeInteger(value) && Number(value) >= 0
 const invalid = () => new Error('invalid-job-storage')
 const active = (state: string) => state === 'queued' || state === 'running'
 
@@ -25,7 +35,7 @@ export class JobRepository {
     private readonly now = () => new Date(),
     private readonly limits = { pending: 20, daily: 100 },
   ) {
-    if (![limits.pending, limits.daily].every((n) => Number.isSafeInteger(n) && n > 0))
+    if (![limits.pending, limits.daily].every((n) => v.is(PositiveInteger, n)))
       throw new Error('invalid-job-limits')
   }
 
@@ -42,19 +52,11 @@ export class JobRepository {
         const queueRef = this.db.doc('control/queueCapacity')
         const usageRef = this.db.doc(`usage/${day}`)
         const [controlDoc, queueDoc, usageDoc] = await tx.getAll(controlRef, queueRef, usageRef)
-        const control = controlDoc.data(),
-          queue = queueDoc.data(),
-          usage = usageDoc.data()
-        if (
-          control?.schemaVersion !== 1 ||
-          typeof control.updatesEnabled !== 'boolean' ||
-          !(control.blockedReason === null || typeof control.blockedReason === 'string') ||
-          !integer(control.recoveryGeneration) ||
-          queue?.schemaVersion !== 1 ||
-          !integer(queue.pendingJobCount) ||
-          (usageDoc.exists && (usage?.schemaVersion !== 1 || !integer(usage.newJobCount)))
-        )
-          throw invalid()
+        const control = parseValue(ControlSchema, controlDoc.data(), invalid)
+        const queue = parseValue(QueueSchema, queueDoc.data(), invalid)
+        const usage = usageDoc.exists
+          ? parseValue(UsageSchema, usageDoc.data(), invalid)
+          : undefined
         if (!control.updatesEnabled || control.blockedReason !== null)
           throw new ApiError(503, 'worker_unavailable', '更新受付は停止しています。')
         const scopes = await tx.getAll(...ids.map((id) => this.db.doc(`scopes/${id}`)))
@@ -67,34 +69,28 @@ export class JobRepository {
             if (id == null) return undefined
             if (!validId(id)) throw invalid()
             const doc = await tx.get(this.db.doc(`jobs/${id}`))
-            const job = doc.data()
-            if (
-              !job ||
-              job.schemaVersion !== 1 ||
-              job.scopeId !== s.id ||
-              !['queued', 'running', 'succeeded', 'failed'].includes(job.state) ||
-              !integer(job.generation) ||
-              (active(job.state)
-                ? job.capacityReserved !== true
-                : job.capacityReserved !== false) ||
-              !(job.cooldownUntil instanceof Timestamp)
-            )
-              throw invalid()
+            const job = parseValue(AdmissionJobSchema, doc.data(), invalid)
+            if (job.scopeId !== s.id) throw invalid()
             return {
               jobId: id,
-              state: job.state as string,
-              generation: job.generation as number,
-              cooldownUntil: job.cooldownUntil as Timestamp,
+              state: job.state,
+              generation: job.generation,
+              cooldownUntil: job.cooldownUntil,
             }
           }),
         )
         let created = 0
         const results = targets.map((target, i) => {
-          const park = parks[i].data(),
-            scope = scopes[i].data(),
+          const park = parseValue(
+              ParkDocumentSchema,
+              parks[i].data(),
+              () => new ApiError(400, 'invalid_request', '未対応の公園・種目です。'),
+            ),
+            scope = scopes[i].exists
+              ? parseValue(AdmissionScopeSchema, scopes[i].data(), invalid)
+              : undefined,
             old = previous[i]
           if (
-            park?.schemaVersion !== 1 ||
             park.enabled !== true ||
             park.parkId !== target.parkId ||
             park.surface !== target.surface
@@ -102,21 +98,18 @@ export class JobRepository {
             throw new ApiError(400, 'invalid_request', '未対応の公園・種目です。')
           if (
             scope &&
-            (scope.schemaVersion !== 1 ||
-              scope.parkId !== target.parkId ||
+            (scope.parkId !== target.parkId ||
               scope.surface !== target.surface ||
-              scope.weekStart !== target.startDate ||
-              !integer(scope.publicationGeneration) ||
-              !(scope.cooldownUntil instanceof Timestamp))
+              scope.weekStart !== target.startDate)
           )
             throw invalid()
           if (old && (active(old.state) || old.cooldownUntil.toMillis() > now.getTime()))
-            return { jobId: old.jobId, generation: old.generation as number, reused: true }
+            return { jobId: old.jobId, generation: old.generation, reused: true }
           if (scope && scope.cooldownUntil.toMillis() > now.getTime()) throw invalid()
           created++
           return {
             jobId: newIds[i],
-            generation: control.recoveryGeneration as number,
+            generation: control.recoveryGeneration,
             reused: false,
           }
         })
@@ -191,15 +184,18 @@ export class JobRepository {
       .get()
     return documents.docs.map((d) => {
       const generation: unknown = d.get('generation')
-      if (!integer(generation)) throw invalid()
+      if (!v.is(NonNegativeInteger, generation)) throw invalid()
       return { jobId: d.id, generation }
     })
   }
 
   async dispatchable(job: DispatchJob) {
-    if (!validId(job.jobId) || !integer(job.generation)) throw invalid()
-    const data = (await this.db.doc(`jobs/${job.jobId}`).get()).data()
-    if (!data || data.schemaVersion !== 1) throw invalid()
+    if (!validId(job.jobId) || !v.is(NonNegativeInteger, job.generation)) throw invalid()
+    const data = parseValue(
+      DispatchSchema,
+      (await this.db.doc(`jobs/${job.jobId}`).get()).data(),
+      invalid,
+    )
     return (
       data.generation === job.generation &&
       data.state === 'queued' &&
@@ -211,8 +207,7 @@ export class JobRepository {
     await this.db.runTransaction(
       async (tx) => {
         const ref = this.db.doc(`jobs/${job.jobId}`)
-        const data = (await tx.get(ref)).data()
-        if (!data || data.schemaVersion !== 1) throw invalid()
+        const data = parseValue(DispatchSchema, (await tx.get(ref)).data(), invalid)
         if (
           data.generation === job.generation &&
           active(data.state) &&
@@ -233,15 +228,8 @@ export class JobRepository {
     const jobRef = this.db.doc(`jobs/${jobId}`),
       queueRef = this.db.doc('control/queueCapacity')
     const [jobDoc, queueDoc] = await tx.getAll(jobRef, queueRef)
-    const job = jobDoc.data(),
-      queue = queueDoc.data()
-    if (
-      job?.schemaVersion !== 1 ||
-      typeof job.capacityReserved !== 'boolean' ||
-      queue?.schemaVersion !== 1 ||
-      !integer(queue.pendingJobCount)
-    )
-      throw invalid()
+    const job = parseValue(ReservationSchema, jobDoc.data(), invalid)
+    const queue = parseValue(QueueSchema, queueDoc.data(), invalid)
     if (!job.capacityReserved) return () => undefined
     if (!active(job.state) || queue.pendingJobCount < 1) throw invalid()
     return () => {

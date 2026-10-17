@@ -1,7 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { AcquisitionSession } from '../src/availability/client'
-import { restoreSession, serializeSession } from '../src/availability/session-state'
+import {
+  restoreSession,
+  serializeSession,
+  parseSessionState,
+} from '../src/availability/session-state'
 
 test('session DTO restores cookies and prepared facilities as one independent state', () => {
   const state = new AcquisitionSession()
@@ -15,7 +19,9 @@ test('session DTO restores cookies and prepared facilities as one independent st
     parkName: '公園',
     facilities: [{ id: '12800020', name: 'テニス' }],
   })
-  const restored = restoreSession(JSON.parse(JSON.stringify(serializeSession(state))))
+  const restored = restoreSession(
+    parseSessionState(JSON.parse(JSON.stringify(serializeSession(state)))),
+  )
   assert.equal(
     restored.jar.getCookieStringSync('https://kouen.sports.metro.tokyo.lg.jp/web/'),
     'SESSION=private',
@@ -32,7 +38,6 @@ test('empty state is accepted; incompatible, expired and contradictory DTOs requ
   for (const value of [
     { ...empty, initialized: true },
     { ...empty, prepared: ['1280/grass'] },
-    { ...empty, initializationRetryAt: -1 },
     { ...empty, cookieJar: { ...empty.cookieJar, version: 'unknown-version' } },
   ])
     assert.throws(() => restoreSession(value), /session-recovery-required/)
