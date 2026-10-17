@@ -46,10 +46,26 @@ Java・Firebase CLIをDocker内で動かす。ホストへのJava導入やGCPロ
 ```sh
 docker compose -f compose.dev.yaml -f compose.firestore.yaml up -d --build --wait --wait-timeout 300
 docker compose -f compose.dev.yaml -f compose.firestore.yaml exec -T api node scripts/check-firestore-emulator.cjs
+```
+
+APIコンテナからは`firestore:8080`、ホストからは`127.0.0.1:17593`へ接続する。ホスト側ポートは`FIRESTORE_PORT`で変更できる。プロジェクトは`demo-akicourt-local`固定。エミュレータ再起動でデータは消える。現時点の検索・更新APIはPostgreSQL版のため、この構成ではSDK接続と公園/祝日・制御状態の初期投入を確認できる。通常のWeb/API起動ではエミュレータは不要。
+
+Firestoreの管理操作はAPIコンテナ内のコンパイル済みCLIを使う。書込みは既定dry-runで、`--apply`を付けた時だけ反映する。
+
+```sh
+# 起動中のAPIコンテナで、まず変更内容を確認する
+docker compose -f compose.dev.yaml -f compose.firestore.yaml exec -T api node dist/storage/firestore-cli.js initialize --project demo-akicourt-local --database '(default)'
+# 初期化を反映（更新受付は停止状態）
+docker compose -f compose.dev.yaml -f compose.firestore.yaml exec -T api node dist/storage/firestore-cli.js initialize --project demo-akicourt-local --database '(default)' --apply
+# 公園・祝日を投入。--applyを外すとdry-run
+docker compose -f compose.dev.yaml -f compose.firestore.yaml exec -T api node dist/storage/firestore-cli.js seed-reference-data --project demo-akicourt-local --database '(default)' --apply
+docker compose -f compose.dev.yaml -f compose.firestore.yaml exec -T api node dist/storage/firestore-cli.js status --project demo-akicourt-local --database '(default)'
+docker compose -f compose.dev.yaml -f compose.firestore.yaml exec -T api npm run test:firestore
+# 停止
 docker compose -f compose.dev.yaml -f compose.firestore.yaml down
 ```
 
-APIコンテナからは`firestore:8080`、ホストからは`127.0.0.1:17593`へ接続する。ホスト側ポートは`FIRESTORE_PORT`で変更できる。プロジェクトは`demo-akicourt-local`固定。エミュレータ再起動でデータは消える。現時点の検索・更新APIはPostgreSQL版のため、この構成ではSDKの接続確認までを行う。通常のWeb/API起動ではエミュレータは不要。
+参照データの投入は取得停止・所有者なしの状態で行う。初期化の再実行で停止理由やカウンターはリセットしない。不完全な初期状態では書き換えずエラーにする。テストは実行ごとの専用エミュレータDBを使い、既存のローカルデータを削除しない。
 
 ## ホストで起動
 
@@ -80,7 +96,7 @@ npm test
 
 ## CI・依存更新
 
-GitHub Actionsの`CI`はmain・developへのpushとすべてのPRで実行する。Node.jsは`.nvmrc`を参照し、Webのlint・型チェック・ビルド・単体テストと、APIの型チェック・ビルド・単体テスト・PostgreSQL 18での統合テストを検証する。lintは自動修正を行わない。CIの依存インストールには`npm ci --ignore-scripts`を使い、依存パッケージのライフサイクルスクリプトを実行しない。テストでは公式サイトへの実通信を行わない。
+GitHub Actionsの`CI`はmain・developへのpushとすべてのPRで実行する。Node.jsは`.nvmrc`を参照し、Webのlint・型チェック・ビルド・単体テストと、APIの型チェック・ビルド・単体テスト・PostgreSQL 18での統合テストを検証する。FirestoreジョブではDockerエミュレータの起動・SDK疎通・初期投入/読取の統合テストも行う。lintは自動修正を行わない。CIの依存インストールには`npm ci --ignore-scripts`を使い、依存パッケージのライフサイクルスクリプトを実行しない。テストでは公式サイトへの実通信を行わない。
 
 Dependabotは毎週月曜9:00（日本時間）にnpm・GitHub Actions・Dockerfile・Composeの依存更新を確認し、develop向けPRを作成する。通常の依存更新は公開から7日間のクールダウンを設け、新規リリース直後の不正なパッケージ混入リスクを抑える。クールダウンはセキュリティ更新には適用されない。npmとDocker関連のminor・patch更新をまとめ、major更新は個別にレビューする。Dependabotを有効にするには`.github/dependabot.yml`をリポジトリのデフォルトブランチにも反映する。
 
