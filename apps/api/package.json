@@ -30,6 +30,8 @@
   "dependencies": {
     "@fastify/autoload": "^6.0.0",
     "@fastify/sensible": "^6.0.0",
+    "@google-cloud/firestore": "9.3.1",
+    "@google-cloud/tasks": "7.3.0",
     "cheerio": "1.2.0",
     "fastify": "^5.0.0",
     "fastify-cli": "^8.0.3",
@@ -46,6 +48,7 @@
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-oxlint": "~1.82.0",
     "fastify-tsconfig": "^3.0.0",
+    "firebase-tools": "15.34.0",
     "oxlint": "~1.82.0",
     "prettier": "3.9.6",
     "ts-node": "^10.4.0",
