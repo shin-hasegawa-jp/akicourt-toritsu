@@ -23,7 +23,7 @@
     "lint:oxlint": "oxlint . --deny-warnings",
     "lint:eslint": "eslint . --max-warnings 0",
     "lint:fix": "npm run lint:oxlint -- --fix && npm run lint:eslint -- --fix",
-    "test:firestore": "node -e \"if (!process.env.FIRESTORE_EMULATOR_HOST) { console.error('FIRESTORE_EMULATOR_HOST is required'); process.exit(1) }\" && npm run build:ts && node --test -r ts-node/register test/firestore.integration.ts test/firestore-snapshots.integration.ts test/firestore-jobs.integration.ts test/firestore-session.integration.ts test/firestore-worker.integration.ts test/firestore-http-worker.integration.ts"
+    "test:firestore": "node -e \"if (!process.env.FIRESTORE_EMULATOR_HOST) { console.error('FIRESTORE_EMULATOR_HOST is required'); process.exit(1) }\" && npm run build:ts && node --test -r ts-node/register test/firestore.integration.ts test/firestore-snapshots.integration.ts test/firestore-jobs.integration.ts test/firestore-session.integration.ts test/firestore-worker.integration.ts test/firestore-http-worker.integration.ts test/firestore-administration.integration.ts"
   },
   "keywords": [],
   "author": "",
