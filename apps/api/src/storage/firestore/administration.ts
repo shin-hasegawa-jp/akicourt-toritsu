@@ -1,6 +1,5 @@
 import * as v from 'valibot'
-import { CookieJar } from 'tough-cookie'
-import { Firestore, Timestamp } from '@google-cloud/firestore'
+import { Firestore } from '@google-cloud/firestore'
 import { NonNegativeInteger, parseValue } from '../../validation'
 import { restoreSession } from '../../availability/session-state'
 import {
@@ -11,7 +10,7 @@ import {
   Versioned,
 } from './schemas'
 
-export const adminCommands = ['pause', 'resume', 'session-clear'] as const
+export const adminCommands = ['pause', 'resume'] as const
 export type AdminCommand = (typeof adminCommands)[number]
 const Metadata = v.looseObject({
   ...Versioned.entries,
@@ -46,10 +45,7 @@ export class Administration {
     private readonly now = () => new Date(),
   ) {}
 
-  async execute(
-    command: AdminCommand,
-    options: { apply?: boolean; confirmWorkerStopped?: boolean } = {},
-  ) {
+  async execute(command: AdminCommand, options: { apply?: boolean } = {}) {
     const apply = options.apply ?? false
     return this.db.runTransaction(
       async (tx) => {
@@ -63,72 +59,34 @@ export class Administration {
         }
         const now = this.now()
         // Expiry alone does not prove that an old worker's official HTTP has stopped.
-        // An interrupted job must be finalized separately before session operations.
+        // Unreleased ownership requires acquisition-reset before resuming.
         if (control.owner !== null || control.leaseUntil !== null)
           throw new AdministrationError('worker-not-released')
-        if (command !== 'resume' && control.updatesEnabled)
-          throw new AdministrationError('pause-required')
-        const ref = this.db.doc('officialSessions/current')
-        const doc = await tx.get(ref)
-        const session =
-          command === 'resume' ? parseValue(SessionDocumentSchema, doc.data(), invalid) : null
-        const metadata = session ?? parseValue(Metadata, doc.data(), invalid)
-        if (session) {
-          usable(session, now)
-          parseValue(
-            QueueSchema,
-            (await tx.get(this.db.doc('control/queueCapacity'))).data(),
-            invalid,
-          )
-          if (
-            Math.max(
-              control.nextRequestNotBefore.toMillis(),
-              metadata.initializationRetryAt.toMillis(),
-            ) > now.getTime()
-          )
-            throw new AdministrationError('cooldown-active')
-          const changed = !control.updatesEnabled
-          if (apply && changed) tx.update(controlRef, { updatesEnabled: true, blockedReason: null })
-          return {
-            action: command,
-            changed,
-            applied: apply && changed,
-            previousStopReason: control.blockedReason,
-          }
-        }
-        if (apply && !options.confirmWorkerStopped)
-          throw new AdministrationError('worker-stopped-confirmation-required')
-        const until = Timestamp.fromMillis(
-          Math.max(
-            metadata.initializationRetryAt.toMillis(),
-            control.nextRequestNotBefore.toMillis(),
-            now.getTime() + 900000,
-          ),
+        const session = parseValue(
+          SessionDocumentSchema,
+          (await tx.get(this.db.doc('officialSessions/current'))).data(),
+          invalid,
         )
-        if (apply) {
-          tx.update(ref, {
-            restorationState: 'usable',
-            revision: metadata.revision + 1,
-            cookieJar: new CookieJar().serializeSync(),
-            initialized: false,
-            prepared: [],
-            targets: [],
-            inFlight: null,
-            sessionGeneration: metadata.sessionGeneration + 1,
-            initializationRetryAt: until,
-          })
-          tx.update(controlRef, {
-            fence: control.fence + 1,
-            // Clearing a session never resumes acquisition or shortens a cooldown.
-            nextRequestNotBefore: until,
-          })
-        }
+        usable(session, now)
+        parseValue(
+          QueueSchema,
+          (await tx.get(this.db.doc('control/queueCapacity'))).data(),
+          invalid,
+        )
+        if (
+          Math.max(
+            control.nextRequestNotBefore.toMillis(),
+            session.initializationRetryAt.toMillis(),
+          ) > now.getTime()
+        )
+          throw new AdministrationError('cooldown-active')
+        const changed = !control.updatesEnabled
+        if (apply && changed) tx.update(controlRef, { updatesEnabled: true, blockedReason: null })
         return {
           action: command,
-          changed: true,
-          applied: apply,
-          requiresWorkerStoppedConfirmation: true,
-          retryNotBefore: until.toDate().toISOString(),
+          changed,
+          applied: apply && changed,
+          previousStopReason: control.blockedReason,
         }
       },
       { maxAttempts: 3 },

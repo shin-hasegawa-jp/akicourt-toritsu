@@ -1,5 +1,6 @@
+import { QueueConfig } from './task-queue'
 import * as v from 'valibot'
-import { ProjectId, parseValue } from '../../validation'
+import { parseValue } from '../../validation'
 import { createHash } from 'node:crypto'
 import { CloudTasksClient, protos } from '@google-cloud/tasks'
 import { DispatchJob } from './jobs'
@@ -20,9 +21,7 @@ const WorkerUrl = v.pipe(
   }),
 )
 const TaskConfigSchema = v.object({
-  projectId: ProjectId,
-  location: v.pipe(v.string(), v.regex(/^[a-z][a-z0-9-]+$/)),
-  queue: v.pipe(v.string(), v.regex(/^[a-zA-Z0-9_-]{1,100}$/)),
+  ...QueueConfig.entries,
   callerSA: v.pipe(
     v.string(),
     v.regex(/^[a-zA-Z0-9-]+@[a-z][a-z0-9-]+\.iam\.gserviceaccount\.com$/),

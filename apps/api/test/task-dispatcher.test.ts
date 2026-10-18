@@ -1,3 +1,4 @@
+import { CloudTaskQueue } from '../src/storage/firestore/task-queue'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { CloudTasksClient } from '@google-cloud/tasks'
@@ -166,4 +167,33 @@ test('all ten healthy jobs are registered and ineligible jobs are skipped', asyn
   outbox.dispatchable = async () => false
   assert.equal((await dispatchPending(outbox, dispatcher, jobs)).submitted.length, 0)
   assert.equal(attempts, 10)
+})
+
+test('queue reset pauses before purge and propagates failure without resume', async () => {
+  const calls: string[] = []
+  let fail = false
+  const client = {
+    pauseQueue: async ({ name }: { name: string }, options: { timeout: number; retry: null }) => {
+      assert.match(name, /queues\/acquire$/)
+      assert.deepEqual(options, { timeout: 5000, retry: null })
+      calls.push('pause')
+    },
+    purgeQueue: async () => {
+      calls.push('purge')
+      if (fail) throw new Error('private-error')
+    },
+    resumeQueue: async () => {
+      calls.push('resume')
+    },
+    close: async () => {},
+  } as unknown as CloudTasksClient
+  const queue = new CloudTaskQueue(config, client)
+  await queue.pauseAndPurge()
+  assert.deepEqual(calls, ['pause', 'purge'])
+  await queue.resume()
+  assert.deepEqual(calls, ['pause', 'purge', 'resume'])
+  fail = true
+  await assert.rejects(queue.pauseAndPurge())
+  assert.deepEqual(calls.slice(3), ['pause', 'purge'])
+  await queue.close()
 })
