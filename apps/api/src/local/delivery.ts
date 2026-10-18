@@ -39,6 +39,8 @@ export async function deliverNext(db: Firestore, workerUrl: string, signal: Abor
 
 async function start() {
   const settings = localSettings()
+  const workerUrl = settings.workerUrl
+  if (!workerUrl) throw new Error('local-worker-url-required')
   const db = connectFirestore({
     projectId: process.env.GOOGLE_CLOUD_PROJECT ?? '',
     databaseId: process.env.FIRESTORE_DATABASE_ID ?? '',
@@ -49,7 +51,7 @@ async function start() {
   process.once('SIGINT', stop)
   try {
     while (!shutdown.signal.aborted) {
-      if (!(await deliverNext(db, settings.workerUrl, shutdown.signal)))
+      if (!(await deliverNext(db, workerUrl, shutdown.signal)))
         await delay(1000, undefined, { signal: shutdown.signal })
     }
   } catch (error) {
