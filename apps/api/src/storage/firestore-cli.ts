@@ -5,8 +5,6 @@ import { parseValue } from '../validation'
 import { Administration, AdministrationError, adminCommands } from './firestore/administration'
 import { connectFirestore } from './firestore/database'
 import { ReferenceRepository } from './firestore/reference-data'
-import { JobRepository } from './firestore/jobs'
-import { CloudTaskDispatcher, dispatchPending } from './firestore/task-dispatcher'
 
 export function parseFirestoreArguments(args: string[]) {
   const [input, ...rest] = args
@@ -15,7 +13,6 @@ export function parseFirestoreArguments(args: string[]) {
       'initialize',
       'seed-reference-data',
       'status',
-      'repair-outbox',
       'acquisition-reset',
       ...adminCommands,
     ]),
@@ -99,32 +96,6 @@ export async function runFirestoreCommand(args: string[]) {
         ...result,
       }
     }
-    if (command === 'repair-outbox') {
-      const repository = new JobRepository(db)
-      const jobs = await repository.pending()
-      if (!apply) return { projectId, databaseId, mode: 'dry-run', action: command, jobs }
-      if (process.env.NODE_ENV !== 'production') throw new Error('tasks-production-required')
-      const dispatcher = new CloudTaskDispatcher({
-        projectId,
-        location: process.env.TASKS_LOCATION ?? '',
-        queue: process.env.TASKS_QUEUE ?? '',
-        callerSA: process.env.TASKS_CALLER_SA ?? '',
-        workerUrl: process.env.WORKER_URL ?? '',
-      })
-      try {
-        return {
-          projectId,
-          databaseId,
-          mode: 'apply',
-          action: command,
-          ...(await dispatchPending(repository, dispatcher, jobs)),
-        }
-      } finally {
-        await dispatcher.close()
-      }
-    }
-    if (command !== 'initialize' && command !== 'seed-reference-data')
-      throw new Error('invalid-command')
     const repository = new ReferenceRepository(db)
     const result =
       command === 'initialize' ? await repository.initialize(apply) : await repository.seed(apply)
@@ -141,7 +112,7 @@ if (require.main === module) {
       if (error instanceof AdministrationError)
         console.error(`Firestore administration refused: ${error.message}`)
       console.error(
-        'Firestore command failed. Check explicit project/database, emulator settings and initialization state. Commands: initialize | seed-reference-data | status | repair-outbox | pause | resume | acquisition-reset; writes require --apply. Acquisition reset also requires --confirm-worker-stopped after confirming the old worker has stopped.',
+        'Firestore command failed. Check explicit project/database, emulator settings and initialization state. Commands: initialize | seed-reference-data | status | pause | resume | acquisition-reset; writes require --apply. Acquisition reset also requires --confirm-worker-stopped after confirming the old worker has stopped.',
       )
       process.exitCode = 1
     },

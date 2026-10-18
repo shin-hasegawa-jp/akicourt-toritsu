@@ -40,7 +40,7 @@ APIコンテナからは`firestore:8080`、ホストからは`127.0.0.1:17593`�
 
 配送処理はFirestoreの登録済みqueuedジョブを1件ずつworkerへHTTP送信する。新規更新のAPIは取得完了を待たず202を返す。配送失敗時は自動再試行せず配送プロセスを停止する。`logs --tail 100 delivery worker`で確認し、必要ならworker停止→`acquisition-reset`→待機期限後の`resume`→worker/delivery再起動で復旧する。終了・再起動により実行中ジョブが残る場合も同じリセットを使う。エミュレータを再起動して初期化し直す方法でも開発を再開できる。worker/配送のソース変更は各サービスを`restart`して再ビルドする（API/Webは開発用の変更監視あり）。
 
-Firestoreの管理操作はAPIコンテナ内のコンパイル済みCLIを使う。書込みは既定dry-runで、`--apply`を付けた時だけ反映する。 `repair-outbox`は登録待ちのqueuedジョブを最大10件確認し、`--apply`で再登録する。本物のCloud Tasksへの登録は本番設定（`TASKS_LOCATION`・`TASKS_QUEUE`・`TASKS_CALLER_SA`・`WORKER_URL`）が必要で、ローカルではdry-runのみ。
+Firestoreの管理操作はAPIコンテナ内のコンパイル済みCLIを使う。書込みは既定dry-runで、`--apply`を付けた時だけ反映する。登録に失敗したジョブは、同じ条件で更新を再送すると再登録される。
 
 ```sh
 # 起動中のAPIコンテナで、まず変更内容を確認する
