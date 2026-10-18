@@ -4,8 +4,6 @@ import Fastify from 'fastify'
 import routes from '../src/routes/availability'
 test('API schemas reject invalid input; missing storage returns safe 503', async () => {
   const app = Fastify()
-  const previous = process.env.GOOGLE_CLOUD_PROJECT
-  delete process.env.GOOGLE_CLOUD_PROJECT
   try {
     await app.register(routes, { prefix: '/availability' })
     assert.equal((await app.inject('/availability/parks')).statusCode, 503)
@@ -46,6 +44,5 @@ test('API schemas reject invalid input; missing storage returns safe 503', async
     assert.equal((await app.inject('/availability/updates/not-a-uuid')).statusCode, 400)
   } finally {
     await app.close()
-    if (previous !== undefined) process.env.GOOGLE_CLOUD_PROJECT = previous
   }
 })

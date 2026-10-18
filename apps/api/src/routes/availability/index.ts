@@ -1,5 +1,3 @@
-import { localSettings } from '../../local/settings'
-import { localDispatcher } from '../../local/delivery'
 import {
   RequestLimits,
   RequestKind,
@@ -9,9 +7,7 @@ import {
 import * as v from 'valibot'
 import { parseValue } from '../../validation'
 import { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify'
-import { connectFirestore } from '../../storage/firestore/database'
 import { AdmissionError } from '../../storage/firestore/jobs'
-import { CloudTaskDispatcher } from '../../storage/firestore/task-dispatcher'
 import { FirestoreAvailabilityService } from '../../availability-api/firestore-service'
 import {
   ApiError,
@@ -24,43 +20,15 @@ import {
 } from '../../availability-api/input'
 import { errorSchema, jobSchema, searchSchema, updateSchema } from '../../availability-api/schemas'
 
-// Inject dependencies for isolated tests. Normal startup owns and closes its SDK clients.
-const routes: FastifyPluginAsync<{
-  service?: Pick<FirestoreAvailabilityService, 'parks' | 'search' | 'updates' | 'job'>
-}> = async (app, opts) => {
-  const projectId = process.env.GOOGLE_CLOUD_PROJECT
-  const db =
-    !opts.service && projectId
-      ? connectFirestore({
-          projectId,
-          databaseId: process.env.FIRESTORE_DATABASE_ID ?? '',
-        })
-      : undefined
-  if (db) app.addHook('onClose', () => db.terminate())
-  const local = process.env.LOCAL_ACQUISITION !== undefined ? localSettings() : undefined
-  const cloudTasks =
-    db && process.env.NODE_ENV === 'production'
-      ? new CloudTaskDispatcher({
-          projectId: projectId ?? '',
-          location: process.env.TASKS_LOCATION ?? '',
-          queue: process.env.TASKS_QUEUE ?? '',
-          callerSA: process.env.TASKS_CALLER_SA ?? '',
-          workerUrl: process.env.WORKER_URL ?? '',
-        })
-      : undefined
-  if (cloudTasks) app.addHook('onClose', () => cloudTasks.close())
-  const backend =
-    opts.service ??
-    (db
-      ? new FirestoreAvailabilityService(
-          db,
-          projectId!,
-          cloudTasks ?? (local ? localDispatcher : undefined),
-        )
-      : undefined)
+export type AvailabilityService = Pick<
+  FirestoreAvailabilityService,
+  'parks' | 'search' | 'updates' | 'job'
+>
+
+const routes: FastifyPluginAsync<{ service?: AvailabilityService }> = async (app, opts) => {
   const service = () => {
-    if (!backend) throw new ApiError(503, 'storage_unavailable', '保存先へ接続できません。')
-    return backend
+    if (!opts.service) throw new ApiError(503, 'storage_unavailable', '保存先へ接続できません。')
+    return opts.service
   }
   app.addHook('onRequest', async (_request, reply) => {
     reply.header('Cache-Control', 'no-store')

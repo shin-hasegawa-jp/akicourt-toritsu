@@ -20,7 +20,7 @@ test('runtime requires a known production role and a valid port; production bind
 })
 
 test('public runtime serves /api consistently and never exposes worker routes', async () => {
-  const api = createRuntimeApp('api')
+  const api = createRuntimeApp({ role: 'api' })
   try {
     for (const url of ['/health', '/api/health'])
       assert.equal((await api.inject(url)).statusCode, 200)
@@ -45,9 +45,12 @@ test('public runtime serves /api consistently and never exposes worker routes', 
 
 test('worker runtime executes the injected worker and exposes no public API', async () => {
   const tasks: object[] = []
-  const worker = createRuntimeApp('worker', {
-    run: async (task) => {
-      tasks.push(task)
+  const worker = createRuntimeApp({
+    role: 'worker',
+    worker: {
+      run: async (task) => {
+        tasks.push(task)
+      },
     },
   })
   try {
@@ -64,4 +67,36 @@ test('worker runtime executes the injected worker and exposes no public API', as
   } finally {
     await worker.close()
   }
+})
+
+test('API runtime passes its injected service through app and closes owned dependencies', async () => {
+  let reads = 0
+  let closed = false
+  const unused = async (): Promise<never> => {
+    throw new Error('unexpected-service-call')
+  }
+  const app = createRuntimeApp({
+    role: 'api',
+    service: {
+      parks: async () => {
+        reads++
+        return { defaultTarget: '1280:grass', groups: [] }
+      },
+      search: unused,
+      updates: unused,
+      job: unused,
+    },
+    close: async () => {
+      closed = true
+    },
+  })
+  try {
+    const response = await app.inject('/api/availability/parks')
+    assert.equal(response.statusCode, 200)
+    assert.equal(response.json().defaultTarget, '1280:grass')
+    assert.equal(reads, 1)
+  } finally {
+    await app.close()
+  }
+  assert.equal(closed, true)
 })

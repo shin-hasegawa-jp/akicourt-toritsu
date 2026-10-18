@@ -1,3 +1,7 @@
+import { AvailabilityService } from './routes/availability'
+import { FirestoreAvailabilityService } from './availability-api/firestore-service'
+import { CloudTaskDispatcher } from './storage/firestore/task-dispatcher'
+import { localDispatcher } from './local/delivery'
 import { localSettings } from './local/settings'
 import { fixtureFetch } from './local/fixture-fetch'
 import Fastify from 'fastify'
@@ -35,34 +39,73 @@ export function serverSettings(environment: NodeJS.ProcessEnv = process.env) {
   )
 }
 
-// Select a single route tree. Cloud Run IAM authenticates worker callers;
-// task headers and a private-looking URL do not provide authentication.
-export function createRuntimeApp(role: 'api' | 'worker', worker?: TaskRunner) {
-  if (role === 'api') {
-    const app = Fastify({ logger: true })
-    void app.register(api)
-    return app
-  }
-  if (worker) return createWorkerApp(worker)
-  const local = process.env.NODE_ENV !== 'production' ? localSettings() : undefined
-  if (!local && process.env.LOCAL_ACQUISITION !== undefined)
-    throw new Error('local-runtime-forbidden')
-  const projectId = process.env.GOOGLE_CLOUD_PROJECT ?? ''
-  const db = connectFirestore({ projectId, databaseId: process.env.FIRESTORE_DATABASE_ID ?? '' })
-  const app = createWorkerApp(
-    new AcquisitionWorker(
-      new WorkerStore(db, projectId),
-      new OfficialSessionRepository(db, projectId),
-      local?.mode === 'fixture' ? { fetchImpl: fixtureFetch() } : {},
-    ),
-  )
-  app.addHook('onClose', () => db.terminate())
+type RuntimeDependencies = (
+  { role: 'api'; service?: AvailabilityService } | { role: 'worker'; worker: TaskRunner }
+) & { close?: () => Promise<void> }
+
+// Route trees only consume dependencies; no environment or SDK construction here.
+export function createRuntimeApp(dependencies: RuntimeDependencies) {
+  const app =
+    dependencies.role === 'api'
+      ? Fastify({ logger: true }).register(api, { service: dependencies.service })
+      : createWorkerApp(dependencies.worker)
+  if (dependencies.close) app.addHook('onClose', dependencies.close)
   return app
+}
+
+// Composition root: choose transports once and own their lifecycle.
+export function buildRuntimeApp(role: 'api' | 'worker') {
+  const local = process.env.LOCAL_ACQUISITION !== undefined ? localSettings() : undefined
+  const projectId = process.env.GOOGLE_CLOUD_PROJECT ?? ''
+  if (role === 'api' && !projectId) return createRuntimeApp({ role })
+  if (role === 'worker' && process.env.NODE_ENV !== 'production' && !local)
+    throw new Error('local-worker-not-configured')
+  const fetchImpl = local?.mode === 'fixture' && role === 'worker' ? fixtureFetch() : fetch
+  const cloudTasks =
+    role === 'api' && process.env.NODE_ENV === 'production'
+      ? new CloudTaskDispatcher({
+          projectId: projectId ?? '',
+          location: process.env.TASKS_LOCATION ?? '',
+          queue: process.env.TASKS_QUEUE ?? '',
+          callerSA: process.env.TASKS_CALLER_SA ?? '',
+          workerUrl: process.env.WORKER_URL ?? '',
+        })
+      : undefined
+  const db = connectFirestore({
+    projectId: projectId ?? '',
+    databaseId: process.env.FIRESTORE_DATABASE_ID ?? '',
+  })
+  const close = async () => {
+    try {
+      await cloudTasks?.close()
+    } finally {
+      await db.terminate()
+    }
+  }
+  return role === 'api'
+    ? createRuntimeApp({
+        role,
+        service: new FirestoreAvailabilityService(
+          db,
+          projectId,
+          cloudTasks ?? (local ? localDispatcher : undefined),
+        ),
+        close,
+      })
+    : createRuntimeApp({
+        role,
+        worker: new AcquisitionWorker(
+          new WorkerStore(db, projectId),
+          new OfficialSessionRepository(db, projectId),
+          { fetchImpl },
+        ),
+        close,
+      })
 }
 
 async function start() {
   const settings = serverSettings()
-  const app = createRuntimeApp(settings.role)
+  const app = buildRuntimeApp(settings.role)
   if (settings.role === 'api') {
     const stop = () => {
       void app.close().catch(() => {
