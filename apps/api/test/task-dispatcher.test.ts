@@ -16,7 +16,8 @@ const config = {
 }
 const job = { jobId: 'job_1', generation: 1 }
 test('Cloud Tasks contract has stable hashed name, minimal body, OIDC and 900s deadline', async () => {
-  const request = taskRequest(config, job)
+  const admitted = { ...job, reused: false }
+  const request = taskRequest(config, admitted)
   assert.deepEqual(JSON.parse(request.task.httpRequest.body.toString()), job)
   assert.equal(request.task.dispatchDeadline.seconds, 900)
   assert.equal(request.task.httpRequest.url, 'https://worker.example.com/tasks/acquire')
