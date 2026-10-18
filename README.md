@@ -107,9 +107,22 @@ API全体の待機は30秒、Firestore処理の待機は10秒、画面は35秒�
 
 本番は`NODE_ENV=production`と`APP_ROLE=api`または`worker`を必須とし、`PORT`（既定8080）で0.0.0.0待受する。ローカルはapiが既定、PORT=17591・API_HOST=127.0.0.1で起動する（DockerはAPI_HOST=0.0.0.0）。本番workerはCloud Run IAMを必須とし、公開サービスとして配置しない。タスクヘッダーだけでは認証しない。ローカルworkerの保存応答/配送配線はFS-3cで追加するため、それまではworker起動を拒否し公式通信を始めない。
 
+## 本番用の配布設定
+
+API/worker共通イメージは`apps/api/Dockerfile`でビルドする。ビルド段階でTypeScriptをコンパイルし、実行段階は本番依存とdistを配置して非rootユーザーで起動する。
+
+```sh
+docker build --platform linux/amd64 -t akicourt-toritsu:release-check -f apps/api/Dockerfile apps/api
+node apps/api/scripts/check-production-image.cjs akicourt-toritsu:release-check
+```
+
+検証スクリプトは外部ネットワークなし・読取専用の一時コンテナでAPI/workerのhealth、不正入力、ルート分離、SIGTERM終了を確認し、コンテナを削除する。実DBや公式取得の検証は含まない。
+
+ルートの`firebase.json`はWebのdistを配信し、`/api/**`を東京の`akicourt-toritsu-api-prod`へ転送する。HTML・SPA fallback等はno-cache、APIパスはno-storeとする。FirestoreのRules/indexは`apps/api/firestore-emulator/`の既存ファイルを共用する。実プロジェクトへのHosting target設定・デプロイ・IAM確認はGCP構築時に行う。[Hosting設定の仕様](https://firebase.google.com/docs/hosting/full-config)。
+
 ## CI・依存更新
 
-GitHub Actionsの`CI`はmain・developへのpushとすべてのPRで実行する。Node.jsは`.nvmrc`を参照し、Webのlint・型チェック・ビルド・単体テストと、APIの型チェック・ビルド・単体テスト・PostgreSQL 18での統合テストを検証する。FirestoreジョブではDockerエミュレータの起動・SDK疎通・初期投入/読取の統合テストも行う。lintは自動修正を行わない。CIの依存インストールには`npm ci --ignore-scripts`を使い、依存パッケージのライフサイクルスクリプトを実行しない。テストでは公式サイトへの実通信を行わない。
+GitHub Actionsの`CI`はmain・developへのpushとすべてのPRで実行する。Node.jsは`.nvmrc`を参照し、Webのlint・型チェック・ビルド・単体テストと、APIの型チェック・ビルド・単体テスト・PostgreSQL 18での統合テストを検証する。FirestoreジョブではDockerエミュレータの起動・SDK疎通・初期投入/読取の統合テストも行う。Production imageジョブでは本番イメージをビルドし、外部通信なしでAPI/workerの起動確認を行う。lintは自動修正を行わない。CIの依存インストールには`npm ci --ignore-scripts`を使い、依存パッケージのライフサイクルスクリプトを実行しない。テストでは公式サイトへの実通信を行わない。
 
 Dependabotは毎週月曜9:00（日本時間）にnpm・GitHub Actions・Dockerfile・Composeの依存更新を確認し、develop向けPRを作成する。通常の依存更新は公開から7日間のクールダウンを設け、新規リリース直後の不正なパッケージ混入リスクを抑える。クールダウンはセキュリティ更新には適用されない。npmとDocker関連のminor・patch更新をまとめ、major更新は個別にレビューする。Dependabotを有効にするには`.github/dependabot.yml`をリポジトリのデフォルトブランチにも反映する。
 
