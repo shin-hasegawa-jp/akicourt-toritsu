@@ -1,5 +1,0 @@
-# Optional localhost database access for host Node.js development.
-services:
-  db:
-    ports:
-      - "127.0.0.1:${DB_PORT:-17592}:5432"
