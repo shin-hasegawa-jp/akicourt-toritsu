@@ -73,9 +73,11 @@ docker compose -f compose.dev.yaml -f compose.firestore.yaml down
 | --- | --- |
 | `status` | 停止理由・所有権解放・復元可否・待機期限を確認。Cookie本文は表示しない |
 | `pause` / `resume` | 取得停止 / 再開。再開には所有権解放・有効DTO・待機期限経過が必要。別の停止解除コマンドは不要 |
-| `session-clear` | 停止中・所有権解放後にCookie・施設準備情報を空にする。公式通信や更新再開は行わない |
+| `acquisition-reset` | 取得停止・タスク破棄・未完了ジョブ終端化・所有権解放・セッション再作成・未処理数0への一括リセット |
 
-通常の運用は`pause → 確認/作業 → resume`。セッションの状態が不明な場合だけ、旧worker終了・所有権解放を確認し`session-clear --apply --confirm-worker-stopped`を実行する。初期化待機・scopeのcooldown・日次数は消さず、クリア後は最低15分（既存期限が先ならその期限）待って`resume`する。期限切れ所有権の修復・カウンター修復・履歴整理は後続対応。
+通常の運用は`pause → 確認/作業 → resume`。取得が進まなくなったら、まず`acquisition-reset`をdry-runで実行し、対象プロジェクト/DB・取得専用キュー・対象件数を確認する。旧workerの終了を確認して`acquisition-reset --apply --confirm-worker-stopped`を適用し、表示された待機期限（最低15分、既存期限が先なら維持）後に`resume`する。リセット前に`pause`を実行する必要はない。リセットは公式通信を行わず、空き状況・公園・祝日・日次取得件数を保持する。`session-clear`・個別ジョブ修復・カウンター再計算は用意しない。
+
+本番では`TASKS_LOCATION`・`TASKS_QUEUE`で指定した取得専用Cloud Tasksキューを停止・purgeする。`resume`はキューを再開してからDBの取得許可を戻す。管理CLIの実行者にはFirestore更新に加え、キューのpause/purge/resume権限が必要。ローカルエミュレータではCloud Tasks操作を省略し、結果に`local-emulator-skipped`と表示する。途中失敗時も取得を止めたままにし、`acquisition-reset`を再実行する。タスク破棄では実行中HTTPの終了を保証しないため、旧worker終了確認は省略しない。未完了ジョブが100件を超える場合は上限エラーで停止し、途中までの初期化を成功扱いしない。履歴整理は必要時に別途対応。
 
 `invalid-home`は初期化を15分抑制し、全体を手動再開待ちにはしない。明示的なセッションタイムアウトは`1→3→4`で1回復旧する。他の公式応答エラーはログ・ジョブ失敗・15分抑制へまとめ、DBへ失敗を確定できればworkerは2xxで終了する。通信結果不明時は取得を停止し、DB障害等で状態確定できない場合は後続通信を止めて5xxを返す。ログはjobId・対象・段階・判定・実HTTPステータスのみで、Cookie・応答本文・生のSDK例外を含めない。
 

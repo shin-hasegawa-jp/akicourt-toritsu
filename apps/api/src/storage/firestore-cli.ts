@@ -1,3 +1,5 @@
+import { AcquisitionReset } from './firestore/acquisition-reset'
+import { CloudTaskQueue } from './firestore/task-queue'
 import * as v from 'valibot'
 import { parseValue } from '../validation'
 import { Administration, AdministrationError, adminCommands } from './firestore/administration'
@@ -9,7 +11,14 @@ import { CloudTaskDispatcher, dispatchPending } from './firestore/task-dispatche
 export function parseFirestoreArguments(args: string[]) {
   const [input, ...rest] = args
   const command = parseValue(
-    v.picklist(['initialize', 'seed-reference-data', 'status', 'repair-outbox', ...adminCommands]),
+    v.picklist([
+      'initialize',
+      'seed-reference-data',
+      'status',
+      'repair-outbox',
+      'acquisition-reset',
+      ...adminCommands,
+    ]),
     input,
     () => new Error('invalid-command'),
   )
@@ -22,7 +31,8 @@ export function parseFirestoreArguments(args: string[]) {
       if (apply || command === 'status') throw new Error('invalid-arguments')
       apply = true
     } else if (flag === '--confirm-worker-stopped') {
-      if (confirmWorkerStopped || command !== 'session-clear') throw new Error('invalid-arguments')
+      if (confirmWorkerStopped || command !== 'acquisition-reset')
+        throw new Error('invalid-arguments')
       confirmWorkerStopped = true
     } else {
       if (
@@ -46,11 +56,41 @@ export async function runFirestoreCommand(args: string[]) {
     parseFirestoreArguments(args)
   const db = connectFirestore({ projectId, databaseId })
   try {
+    const queue = () =>
+      process.env.NODE_ENV === 'production'
+        ? new CloudTaskQueue({
+            projectId,
+            location: process.env.TASKS_LOCATION ?? '',
+            queue: process.env.TASKS_QUEUE ?? '',
+          })
+        : null
+    if (command === 'acquisition-reset') {
+      const maintenance = queue()
+      try {
+        return {
+          projectId,
+          databaseId,
+          mode: apply ? 'apply' : 'dry-run',
+          ...(await new AcquisitionReset(db, maintenance).run({ apply, confirmWorkerStopped })),
+        }
+      } finally {
+        await maintenance?.close()
+      }
+    }
     const administration = new Administration(db)
     const adminCommand = adminCommands.find((value) => value === command)
     if (adminCommand || command === 'status') {
+      if (adminCommand === 'resume' && apply) {
+        await administration.execute('resume')
+        const maintenance = queue()
+        try {
+          await maintenance?.resume()
+        } finally {
+          await maintenance?.close()
+        }
+      }
       const result = adminCommand
-        ? await administration.execute(adminCommand, { apply, confirmWorkerStopped })
+        ? await administration.execute(adminCommand, { apply })
         : await administration.status()
       return {
         projectId,
@@ -101,7 +141,7 @@ if (require.main === module) {
       if (error instanceof AdministrationError)
         console.error(`Firestore administration refused: ${error.message}`)
       console.error(
-        'Firestore command failed. Check explicit project/database, emulator settings and initialization state. Commands: initialize | seed-reference-data | status | repair-outbox | pause | resume | session-clear; writes require --apply. Session clear also requires --confirm-worker-stopped after confirming the old worker has stopped.',
+        'Firestore command failed. Check explicit project/database, emulator settings and initialization state. Commands: initialize | seed-reference-data | status | repair-outbox | pause | resume | acquisition-reset; writes require --apply. Acquisition reset also requires --confirm-worker-stopped after confirming the old worker has stopped.',
       )
       process.exitCode = 1
     },

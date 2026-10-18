@@ -2,190 +2,210 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { Firestore, Timestamp } from '@google-cloud/firestore'
-import { CookieJar } from 'tough-cookie'
 import { Administration } from '../src/storage/firestore/administration'
+import { AcquisitionReset } from '../src/storage/firestore/acquisition-reset'
 import { ReferenceRepository } from '../src/storage/firestore/reference-data'
+import { OfficialSessionRepository } from '../src/storage/firestore/official-session'
 import { firestoreSettings } from '../src/storage/firestore/database'
 import { WorkerStore } from '../src/storage/firestore/worker-store'
 import { JobRepository } from '../src/storage/firestore/jobs'
+import { scopeId } from '../src/storage/firestore/snapshot-codec'
+import { syntheticResult } from './firestore-fixtures'
 
+const projectId = 'demo-akicourt-local'
+const target = { parkId: '1280', surface: 'grass' as const, startDate: '2026-10-12' }
 test(
-  'Firestore operator controls and session recovery',
+  'Firestore acquisition reset and operator controls',
   { skip: !process.env.FIRESTORE_EMULATOR_HOST, timeout: 120000 },
   async (t) => {
     const db = new Firestore({
-      ...firestoreSettings({ projectId: 'demo-akicourt-local', databaseId: '(default)' }),
+      ...firestoreSettings({ projectId, databaseId: '(default)' }),
       databaseId: `test-${randomUUID()}`,
     })
     let now = new Date()
-    const admin = new Administration(db, () => now)
+    const admin = new Administration(db, () => now),
+      jobs = new JobRepository(db, () => now),
+      store = new WorkerStore(db, projectId, () => now)
     const control = db.doc('control/acquisition'),
-      session = db.doc('officialSessions/current')
-    const reset = async () => {
+      session = db.doc('officialSessions/current'),
+      queue = db.doc('control/queueCapacity')
+    const calls: string[] = []
+    const maintenance = {
+      name: 'test-queue',
+      pauseAndPurge: async () => {
+        assert.equal((await control.get()).get('updatesEnabled'), false)
+        const doc = await session.get()
+        if (doc.exists) assert.equal(doc.get('restorationState'), 'recovery_required')
+        calls.push('pause/purge')
+      },
+      resume: async () => {
+        calls.push('resume')
+      },
+    }
+    const reset = new AcquisitionReset(db, maintenance, () => now)
+    const fresh = async () => {
       for (const collection of await db.listCollections()) await db.recursiveDelete(collection)
       await new ReferenceRepository(db).initialize(true)
+      await new ReferenceRepository(db).seed(true)
+      calls.length = 0
     }
-    const saved = async () =>
-      JSON.stringify([(await control.get()).data(), (await session.get()).data()])
-    const privateSession = async () => {
-      const jar = new CookieJar()
-      jar.setCookieSync(
-        'SESSION=private-cookie; Secure; Path=/',
-        'https://kouen.sports.metro.tokyo.lg.jp/web/',
-      )
-      await session.update({
-        cookieJar: jar.serializeSync(),
-        initialized: true,
-        prepared: ['1280/grass'],
-        targets: [
-          {
-            key: '1280/grass',
-            parkName: 'private-park',
-            facilities: [{ id: '12800020', name: 'private-facility' }],
-          },
-        ],
-      })
-    }
+    const task = async () => (await jobs.enqueue([target]))[0]
     try {
       await t.test(
-        'dry-run makes no writes and status never returns Cookie or facility information',
+        'dry-run does not stop acquisition, purge tasks or expose session data',
         async () => {
           assert.deepEqual(await admin.status(), { initialized: false })
-          await reset()
-          await privateSession()
-          const before = await saved()
-          for (const command of ['resume', 'session-clear'] as const) {
-            assert.equal((await admin.execute(command)).applied, false)
-            assert.equal(await saved(), before)
-          }
-          const status = await admin.status()
-          assert.equal(status.sessionUsable, true)
-          assert.doesNotMatch(JSON.stringify(status), /private|cookieJar|prepared|targets/)
+          await fresh()
+          await admin.execute('resume', { apply: true })
+          await task()
+          const before = JSON.stringify([
+            (await control.get()).data(),
+            (await session.get()).data(),
+          ])
+          const preview = await reset.run()
+          assert.equal(preview.queuedJobs, 1)
+          assert.equal(preview.applied, false)
+          assert.equal(calls.length, 0)
+          assert.equal(
+            JSON.stringify([(await control.get()).data(), (await session.get()).data()]),
+            before,
+          )
+          await assert.rejects(reset.run({ apply: true }), /confirmation-required/)
+          assert.equal((await control.get()).get('updatesEnabled'), true)
+          assert.doesNotMatch(JSON.stringify(await admin.status()), /cookieJar|prepared|targets/)
         },
       )
       await t.test(
-        'pause works during acquisition; session edits and resume require fully released ownership',
+        'pause works during acquisition; ordinary resume still requires ownership release',
         async () => {
-          await reset()
-          await new ReferenceRepository(db).seed(true)
+          await fresh()
           await admin.execute('resume', { apply: true })
-          const target = { parkId: '1280', surface: 'grass' as const, startDate: '2026-10-12' }
-          const task = (await new JobRepository(db, () => now).enqueue([target]))[0]
-          const store = new WorkerStore(db, 'demo-akicourt-local', () => now)
-          const claim = await store.claim(task)
-          assert.ok(claim)
+          const owned = await store.claim(await task())
+          assert.ok(owned)
           await admin.execute('pause')
           assert.equal((await control.get()).get('updatesEnabled'), true)
           await admin.execute('pause', { apply: true })
-          await assert.rejects(store.gate(claim), /updates-disabled/)
-          await assert.rejects(store.heartbeat(claim), /updates-disabled/)
-          for (const command of ['resume', 'session-clear'] as const)
-            await assert.rejects(
-              admin.execute(command, { apply: true, confirmWorkerStopped: true }),
-              /worker-not-released/,
-            )
-          now = new Date(now.getTime() + 90001)
-          await assert.rejects(
-            admin.execute('session-clear', { apply: true, confirmWorkerStopped: true }),
-            /worker-not-released/,
-          )
-          await store.claim(task)
-          assert.equal((await control.get()).get('owner'), null)
-          assert.equal((await db.doc(`jobs/${task.jobId}`).get()).get('errorCode'), 'interrupted')
+          await assert.rejects(store.gate(owned), /updates-disabled/)
+          await assert.rejects(admin.execute('resume', { apply: true }), /worker-not-released/)
         },
       )
       await t.test(
-        'clear removes Cookie/preparation, retains waiting and diagnostic reason; resume performs the only release',
+        'reset ends queued/running jobs, fences old workers and preserves results/reference/daily counts',
         async () => {
-          await reset()
-          await privateSession()
-          const later = Timestamp.fromMillis(now.getTime() + 1800000)
-          await session.update({
-            initializationRetryAt: later,
-            initializationError: 'invalid-home',
-          })
-          await control.update({
-            blockedReason: 'session-recovery-required',
-            nextRequestNotBefore: later,
-          })
-          await db.doc('scopes/preserved').set({ cooldownUntil: later })
-          await db.doc('usage/preserved').set({ newJobCount: 50 })
-          {
-            const command = 'session-clear' as const
-            const before = await saved()
-            await assert.rejects(admin.execute(command, { apply: true }), /confirmation-required/)
-            assert.equal(await saved(), before)
-            const previous = (await session.get()).get('sessionGeneration')
-            await admin.execute(command, { apply: true, confirmWorkerStopped: true })
-            const current = await session.get()
-            assert.equal(current.get('sessionGeneration'), previous + 1)
-            assert.deepEqual(current.get('cookieJar.cookies'), [])
-            assert.deepEqual(current.get('prepared'), [])
-            assert.deepEqual(current.get('targets'), [])
-            assert.equal(current.get('initialized'), false)
-            assert.equal(current.get('inFlight'), null)
-            assert.equal(current.get('initializationRetryAt').toMillis(), later.toMillis())
-            assert.equal(current.get('initializationError'), 'invalid-home')
-            assert.equal((await control.get()).get('blockedReason'), 'session-recovery-required')
-            assert.equal((await control.get()).get('updatesEnabled'), false)
-          }
-          await assert.rejects(admin.execute('resume', { apply: true }), /cooldown-active/)
-          now = new Date(later.toMillis())
+          await fresh()
           await admin.execute('resume', { apply: true })
-          assert.equal((await control.get()).get('updatesEnabled'), true)
-          assert.equal((await control.get()).get('blockedReason'), null)
+          const tasks = await jobs.enqueue([target, { ...target, parkId: '1040' }])
+          const staged = await store.snapshots.stage(syntheticResult(target, 2))
+          await db.runTransaction((tx) => store.snapshots.publish(tx, staged.snapshotId, target, 0))
+          const owned = await store.claim(tasks[0])
+          assert.ok(owned)
+          const loaded = await new OfficialSessionRepository(db, projectId, () => now).load(owned)
+          await loaded.checkpoint(loaded.state, { kind: 'before-request' })
+          const usage = JSON.stringify(
+            (await db.collection('usage').get()).docs.map((doc) => doc.data()),
+          )
+          const parks = (await db.collection('parkSurfaces').get()).size
+          const longer = Timestamp.fromMillis(now.getTime() + 1800000)
+          await db.doc(`scopes/${scopeId(target)}`).update({ cooldownUntil: longer })
+          const result = await reset.run({ apply: true, confirmWorkerStopped: true })
+          assert.equal(result.retryNotBefore, longer.toDate().toISOString())
+          assert.equal(result.runningJobs, 1)
+          assert.equal(result.queuedJobs, 1)
+          assert.deepEqual(calls, ['pause/purge'])
+          assert.equal((await control.get()).get('owner'), null)
+          assert.equal((await control.get()).get('updatesEnabled'), false)
+          assert.equal((await queue.get()).get('pendingJobCount'), 0)
+          for (const item of tasks) {
+            assert.equal((await db.doc(`jobs/${item.jobId}`).get()).get('state'), 'failed')
+            assert.equal(await store.claim(item), null)
+          }
+          await assert.rejects(store.heartbeat(owned), /ownership-lost/)
+          await assert.rejects(loaded.checkpoint(loaded.state, { kind: 'state' }), /ownership-lost/)
           assert.equal(
-            (await db.doc('scopes/preserved').get()).get('cooldownUntil').toMillis(),
-            later.toMillis(),
+            (await db.doc(`scopes/${scopeId(target)}`).get()).get('latestSnapshotId'),
+            staged.snapshotId,
           )
-          assert.equal((await db.doc('usage/preserved').get()).get('newJobCount'), 50)
-          await assert.rejects(
-            admin.execute('session-clear', { apply: true, confirmWorkerStopped: true }),
-            /pause-required/,
+          assert.equal((await db.doc(`snapshots/${staged.snapshotId}`).get()).exists, true)
+          assert.equal((await db.collection('parkSurfaces').get()).size, parks)
+          assert.equal(
+            JSON.stringify((await db.collection('usage').get()).docs.map((doc) => doc.data())),
+            usage,
           )
+          const dto = await session.get()
+          assert.deepEqual(dto.get('cookieJar.cookies'), [])
+          assert.deepEqual(dto.get('prepared'), [])
+          assert.deepEqual(dto.get('targets'), [])
+          assert.equal(dto.get('inFlight'), null)
+          await assert.rejects(admin.execute('resume', { apply: true }), /cooldown-active/)
+          now = new Date(Date.parse(result.retryNotBefore))
+          await admin.execute('resume', { apply: true })
+          const next = await task()
+          assert.ok(next.generation > tasks[0].generation)
+          assert.ok(await store.claim(next))
         },
       )
       await t.test(
-        'invalid Cookie can be explicitly recovered from valid metadata without exposing the input',
+        'queue failure leaves acquisition stopped; retrying reset completes recovery',
         async () => {
-          await reset()
-          await session.update({
-            cookieJar: { private: 'private-cookie' },
-            inFlight: { private: 'private-marker' },
-          })
-          const status = await admin.status()
-          assert.equal(status.sessionUsable, false)
-          assert.equal(status.restorationState, 'invalid')
-          assert.doesNotMatch(JSON.stringify(status), /private/)
-          await assert.rejects(admin.execute('resume', { apply: true }))
-          await admin.execute('session-clear', { apply: true, confirmWorkerStopped: true })
+          await fresh()
+          await admin.execute('resume', { apply: true })
+          const pending = await task()
+          const failing = new AcquisitionReset(
+            db,
+            {
+              ...maintenance,
+              pauseAndPurge: async () => {
+                throw new Error('private-sdk-error')
+              },
+            },
+            () => now,
+          )
+          await assert.rejects(failing.run({ apply: true, confirmWorkerStopped: true }))
+          assert.equal((await control.get()).get('updatesEnabled'), false)
+          assert.equal((await db.doc(`jobs/${pending.jobId}`).get()).get('state'), 'queued')
+          await assert.rejects(
+            admin.execute('resume', { apply: true }),
+            /session-recovery-required/,
+          )
+          await reset.run({ apply: true, confirmWorkerStopped: true })
+          assert.equal((await queue.get()).get('pendingJobCount'), 0)
+          assert.equal((await admin.status()).sessionUsable, true)
+        },
+      )
+      await t.test(
+        'reset rebuilds missing session/corrupt pending counter and retains longer waiting times',
+        async () => {
+          await fresh()
+          const later = Timestamp.fromMillis(now.getTime() + 1800000)
+          await control.update({ nextRequestNotBefore: later })
+          await session.delete()
+          await queue.update({ pendingJobCount: -1 })
+          const result = await reset.run({ apply: true, confirmWorkerStopped: true })
+          assert.equal(result.retryNotBefore, later.toDate().toISOString())
+          assert.equal((await queue.get()).get('pendingJobCount'), 0)
           assert.equal((await admin.status()).sessionUsable, true)
           assert.equal(
             (await session.get()).get('initializationRetryAt').toMillis(),
-            now.getTime() + 900000,
+            later.toMillis(),
           )
-          await session.update({ schemaVersion: 999 })
-          const before = await saved()
-          await assert.rejects(
-            admin.execute('session-clear', { apply: true, confirmWorkerStopped: true }),
-            /invalid-admin-state/,
-          )
-          assert.equal(await saved(), before)
         },
       )
-      await t.test(
-        'concurrent resume and clear cannot enable acquisition before the waiting deadline',
-        async () => {
-          await reset()
-          const outcomes = await Promise.allSettled([
-            admin.execute('resume', { apply: true }),
-            admin.execute('session-clear', { apply: true, confirmWorkerStopped: true }),
-          ])
-          assert.equal(outcomes.filter((outcome) => outcome.status === 'fulfilled').length, 1)
-          const status = await admin.status()
-          assert.ok(!status.updatesEnabled || status.sessionUsable)
-        },
-      )
+      await t.test('reset is bounded and failure never re-enables acquisition', async () => {
+        await fresh()
+        const batch = db.batch()
+        for (let i = 0; i < 101; i++)
+          batch.set(db.doc(`jobs/limit-${i}`), {
+            state: 'queued',
+            scopeId: '1280_grass_2026-10-12',
+          })
+        await batch.commit()
+        await assert.rejects(
+          reset.run({ apply: true, confirmWorkerStopped: true }),
+          /reset-job-limit-exceeded/,
+        )
+        assert.equal((await control.get()).get('updatesEnabled'), false)
+        assert.equal((await session.get()).get('restorationState'), 'recovery_required')
+      })
     } finally {
       try {
         for (const collection of await db.listCollections()) await db.recursiveDelete(collection)
