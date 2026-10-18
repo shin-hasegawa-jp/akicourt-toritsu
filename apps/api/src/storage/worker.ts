@@ -61,7 +61,6 @@ export async function work(
           ...(result.state === 'failed' ? { error: result.error } : {}),
         }),
       )
-      if (result.state === 'failed' && result.error === 'access-blocked') break
       if (once) break
     }
   } catch (error) {

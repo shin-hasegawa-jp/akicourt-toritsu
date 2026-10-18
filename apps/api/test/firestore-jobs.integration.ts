@@ -160,9 +160,9 @@ test(
         async () => {
           await jobs.submitted({ ...first, generation: 999 })
           assert.equal(await jobs.dispatchable({ ...first, generation: 999 }), false)
-          await control.update({ blockedReason: 'access-blocked' })
+          await control.update({ updatesEnabled: false, blockedReason: 'manual-pause' })
           await assert.rejects(jobs.enqueue([target]))
-          await control.update({ blockedReason: null })
+          await control.update({ updatesEnabled: true, blockedReason: null })
           await queue.update({ pendingJobCount: -1 })
           await assert.rejects(jobs.enqueue([target]), /invalid-job-storage/)
         },

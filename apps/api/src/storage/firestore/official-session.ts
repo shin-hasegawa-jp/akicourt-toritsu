@@ -47,7 +47,7 @@ export class OfficialSessionRepository {
             now,
           ),
           data = doc.data()
-        if (!control.updatesEnabled || control.blockedReason !== null) fail('updates-disabled')
+        if (!control.updatesEnabled) fail('updates-disabled')
         try {
           const saved = parseValue(
             SessionDocumentSchema,
@@ -69,6 +69,10 @@ export class OfficialSessionRepository {
             generation: saved.sessionGeneration,
           }
         } catch {
+          tx.update(controlDoc.ref, {
+            updatesEnabled: false,
+            blockedReason: 'session-recovery-required',
+          })
           if (data && data.restorationState !== 'disabled')
             tx.update(ref, { restorationState: 'recovery_required' })
           return null
@@ -106,7 +110,7 @@ export class OfficialSessionRepository {
           )
             fail()
           if (event.kind === 'before-request') {
-            if (!control.updatesEnabled || control.blockedReason !== null) fail('updates-disabled')
+            if (!control.updatesEnabled) fail('updates-disabled')
             if (data.inFlight !== null) fail()
             if (control.nextRequestNotBefore.toMillis() > now.getTime()) fail('request-too-soon')
           } else if (
@@ -150,8 +154,11 @@ export class OfficialSessionRepository {
             tx.update(controlDoc.ref, {
               nextRequestNotBefore: Timestamp.fromMillis(now.getTime() + 2000),
             })
-          if (event.kind === 'response' && event.error === 'access-blocked')
-            tx.update(controlDoc.ref, { blockedReason: 'access-blocked' })
+          if (uncertain)
+            tx.update(controlDoc.ref, {
+              updatesEnabled: false,
+              blockedReason: 'session-recovery-required',
+            })
           return { revision: next.revision, generation: nextGeneration, uncertain }
         },
         { maxAttempts: 3 },

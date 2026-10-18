@@ -21,7 +21,7 @@ test('Japan date and canonical scopes', () => {
   )
   assert.throws(() => scopes([{ parkId: '1280', surface: 'grass' }], '2026-10-10', '2026-10-17'))
 })
-test('403 stops immediately without retry', async () => {
+test('non-success HTTP fails without retry', async () => {
   let count = 0
   const [result] = await acquire([{ parkId: '1280', surface: 'grass', startDate: '2026-10-12' }], {
     fetchImpl: async () => {
@@ -31,7 +31,7 @@ test('403 stops immediately without retry', async () => {
     intervalMs: 0,
   })
   assert.equal(result.state, 'failed')
-  if (result.state === 'failed') assert.equal(result.error, 'access-blocked')
+  if (result.state === 'failed') assert.equal(result.error, 'http-error')
   assert.equal(count, 1)
 })
 test(
@@ -151,11 +151,8 @@ test(
       assert.equal(calls, 1)
       assert.equal(
         (await pool.query('SELECT blocked_reason FROM worker_lease')).rows[0].blocked_reason,
-        'access-blocked',
+        null,
       )
-      await assert.rejects(store.enqueue([target]), /worker-blocked/)
-      assert.equal(await store.takeLease(randomUUID()), false)
-      await store.resetBlock()
       await expireCooldown()
       await store.enqueue([target])
       const data = JSON.parse(

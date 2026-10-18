@@ -37,7 +37,7 @@ docker compose -f compose.dev.yaml -f compose.db.yaml --profile acquisition up -
 docker compose -f compose.dev.yaml -f compose.db.yaml --profile acquisition stop worker
 ```
 
-403/429では全体停止し、再起動しても通信を再開しない。原因確認・ワーカー停止後、上の`exec -T api npm run storage --`に`reset-block`を指定して解除する。同一週の再要求は成功・失敗とも15分間再利用する。`npm run test:db`は接続先DBの隔離スキーマで検証する（`DATABASE_URL`必須）。
+公式の非成功HTTP応答は共通の取得失敗として扱い、即時再試行しない。同一週の再要求は成功・失敗とも15分間再利用する。`npm run test:db`は接続先DBの隔離スキーマで検証する（`DATABASE_URL`必須）。
 
 ## Firestoreのローカル検証
 
@@ -66,6 +66,18 @@ docker compose -f compose.dev.yaml -f compose.firestore.yaml down
 ```
 
 参照データの投入は取得停止・所有者なしの状態で行う。初期化の再実行で停止理由やカウンターはリセットしない。不完全な初期状態では書き換えずエラーにする。テストは実行ごとの専用エミュレータDBを使い、既存のローカルデータを削除しない。
+
+管理CLIの追加コマンド（上記コマンドの`initialize`部分を置き換える）：
+
+| コマンド | 操作 |
+| --- | --- |
+| `status` | 停止理由・所有権解放・復元可否・待機期限を確認。Cookie本文は表示しない |
+| `pause` / `resume` | 取得停止 / 再開。再開には所有権解放・有効DTO・待機期限経過が必要。別の停止解除コマンドは不要 |
+| `session-clear` | 停止中・所有権解放後にCookie・施設準備情報を空にする。公式通信や更新再開は行わない |
+
+通常の運用は`pause → 確認/作業 → resume`。セッションの状態が不明な場合だけ、旧worker終了・所有権解放を確認し`session-clear --apply --confirm-worker-stopped`を実行する。初期化待機・scopeのcooldown・日次数は消さず、クリア後は最低15分（既存期限が先ならその期限）待って`resume`する。期限切れ所有権の修復・カウンター修復・履歴整理は後続対応。
+
+`invalid-home`は初期化を15分抑制し、全体を手動再開待ちにはしない。明示的なセッションタイムアウトは`1→3→4`で1回復旧する。他の公式応答エラーはログ・ジョブ失敗・15分抑制へまとめ、DBへ失敗を確定できればworkerは2xxで終了する。通信結果不明時は取得を停止し、DB障害等で状態確定できない場合は後続通信を止めて5xxを返す。ログはjobId・対象・段階・判定・実HTTPステータスのみで、Cookie・応答本文・生のSDK例外を含めない。
 
 ## ホストで起動
 

@@ -11,7 +11,7 @@ import { JobRepository } from '../src/storage/firestore/jobs'
 import { WorkerStore } from '../src/storage/firestore/worker-store'
 import { OfficialSessionRepository } from '../src/storage/firestore/official-session'
 import { scopeId } from '../src/storage/firestore/snapshot-codec'
-import { AcquisitionWorker } from '../src/worker/runner'
+import { AcquisitionWorker, FailureLog } from '../src/worker/runner'
 import { createWorkerApp } from '../src/worker/app'
 
 const target: Target = { parkId: '1280', surface: 'grass', startDate: '2026-10-12' }
@@ -127,37 +127,85 @@ test(
         },
       )
       await t.test(
-        'official rejection is acknowledged only after saved failure; all later work stops',
+        'non-success HTTP is recorded and acknowledged once without global pause',
+        async () => {
+          for (const status of [403, 429, 503, 302]) {
+            await reset()
+            const events: FailureLog[] = []
+            const worker = new AcquisitionWorker(
+              new WorkerStore(db, projectId, () => now),
+              sessions,
+              {
+                logFailure: (event) => {
+                  events.push(event)
+                },
+                fetchImpl: async () => {
+                  paths.push('blocked')
+                  return new Response('private', { status })
+                },
+                sleep,
+              },
+            )
+            const app = createWorkerApp(worker)
+            try {
+              const task = await enqueue()
+              const response = await app.inject({
+                method: 'POST',
+                url: '/tasks/acquire',
+                payload: { jobId: task.jobId, generation: task.generation },
+              })
+              assert.equal(response.statusCode, 200)
+              assert.doesNotMatch(response.body, /private|cookie/i)
+              assert.equal((await control.get()).get('blockedReason'), null)
+              assert.equal((await control.get()).get('updatesEnabled'), true)
+              assert.equal((await job(task.jobId).get()).get('errorCode'), 'acquisition-failed')
+              assert.equal(events[0].httpStatus, status)
+              assert.equal(events[0].severity, 'ERROR')
+              assert.equal(events[0].phase, 'home')
+              assert.doesNotMatch(JSON.stringify(events), /private|cookie/i)
+              assert.equal((await job(task.jobId).get()).get('state'), 'failed')
+              assert.equal((await scope.get()).get('latestSnapshotId'), null)
+              assert.equal(paths.length, 1)
+            } finally {
+              await app.close()
+            }
+          }
+        },
+      )
+      await t.test(
+        'invalid-home shares a 15 minute initialization wait without global pause',
         async () => {
           await reset()
+          const events: FailureLog[] = []
+          let calls = 0
           const worker = new AcquisitionWorker(
             new WorkerStore(db, projectId, () => now),
             sessions,
             {
-              fetchImpl: async () => {
-                paths.push('blocked')
-                return new Response('private', { status: 403 })
-              },
               sleep,
+              logFailure: (event) => {
+                events.push(event)
+              },
+              fetchImpl: async () => {
+                calls++
+                return new Response('<html>private-body</html>', {
+                  headers: { 'set-cookie': 'SESSION=private-cookie; Path=/; Secure' },
+                })
+              },
             },
           )
-          const app = createWorkerApp(worker)
-          try {
-            const task = await enqueue()
-            const response = await app.inject({
-              method: 'POST',
-              url: '/tasks/acquire',
-              payload: { jobId: task.jobId, generation: task.generation },
-            })
-            assert.equal(response.statusCode, 200)
-            assert.doesNotMatch(response.body, /private|cookie/i)
-            assert.equal((await control.get()).get('blockedReason'), 'access-blocked')
-            assert.equal((await job(task.jobId).get()).get('state'), 'failed')
-            assert.equal((await scope.get()).get('latestSnapshotId'), null)
-            assert.equal(paths.length, 1)
-          } finally {
-            await app.close()
-          }
+          const first = await enqueue()
+          await worker.run(first, new AbortController().signal)
+          const second = (await jobs.enqueue([{ ...target, parkId: '1040' }]))[0]
+          await worker.run(second, new AbortController().signal)
+          assert.equal(calls, 1)
+          assert.equal((await job(first.jobId).get()).get('errorCode'), 'invalid-home')
+          assert.equal((await job(second.jobId).get()).get('errorCode'), 'invalid-home')
+          assert.equal((await control.get()).get('updatesEnabled'), true)
+          assert.equal((await session.get()).get('initializationError'), 'invalid-home')
+          assert.equal(events[0].httpStatus, 200)
+          assert.equal(events[0].reason, 'invalid-home')
+          assert.doesNotMatch(JSON.stringify(events), /private|cookie/i)
         },
       )
       await t.test(

@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { acquireParkCatalog, CatalogPark, Options } from '../availability/client'
-import { AcquisitionError } from '../availability/parser'
 import { Store } from './store'
 import parks from './park-options'
 
@@ -60,13 +59,6 @@ export async function checkParkCatalog(store: Store, options: Options = {}) {
       officialCount: official.length,
       ...compareParkCatalog(local, official),
     }
-  } catch (error) {
-    if (error instanceof AcquisitionError && error.kind === 'access-blocked')
-      await store.pool.query(
-        "UPDATE worker_lease SET blocked_reason='access-blocked' WHERE id=1 AND owner=$1 AND expires_at>clock_timestamp()",
-        [owner],
-      )
-    throw error
   } finally {
     clearInterval(timer)
     await store.release(owner)

@@ -1,3 +1,4 @@
+import { Administration } from './administration'
 import * as v from 'valibot'
 import { parseValue } from '../../validation'
 import {
@@ -253,23 +254,6 @@ export class ReferenceRepository {
   }
 
   async status() {
-    return this.db.runTransaction(
-      async (tx) => {
-        const state = await this.state(tx)
-        if (state.empty) return { initialized: false }
-        // Never return the CookieJar, prepared target names, owner, or raw DTO.
-        return {
-          initialized: true,
-          updatesEnabled: state.control.updatesEnabled,
-          blockedReason: state.control.blockedReason,
-          pendingJobCount: state.queue.pendingJobCount,
-          sessionGeneration: state.session.sessionGeneration,
-          sessionRevision: state.session.revision,
-          restorationState: state.session.restorationState,
-          lastUsedAt: state.session.lastUsedAt?.toDate().toISOString() ?? null,
-        }
-      },
-      { readOnly: true },
-    )
+    return new Administration(this.db).status()
   }
 }

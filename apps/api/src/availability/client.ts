@@ -89,79 +89,69 @@ class Session {
   async request(path: string, fields?: Record<string, string>): Promise<string> {
     // Paths are constants supplied by this module, never user-provided URLs.
     const url = `${base}${path}`
-    for (let attempt = 0; attempt < 2; attempt++) {
-      if (this.metrics.length) await (this.options.sleep || pause)(this.options.intervalMs ?? 2000)
-      this.options.signal?.throwIfAborted()
-      await this.options.beforeRequest?.()
-      await checkpoint(this.options, this.state, { kind: 'before-request' })
-      this.options.signal?.throwIfAborted()
-      const started = performance.now()
-      const controller = new AbortController()
-      const timer = setTimeout(() => controller.abort(), this.options.timeoutMs ?? 45000)
-      const metric: Metric = { path, durationMs: 0, attempt: attempt + 1 }
-      this.metrics.push(metric)
-      let responseError: string | undefined
+    if (this.metrics.length) await (this.options.sleep || pause)(this.options.intervalMs ?? 2000)
+    this.options.signal?.throwIfAborted()
+    await this.options.beforeRequest?.()
+    await checkpoint(this.options, this.state, { kind: 'before-request' })
+    this.options.signal?.throwIfAborted()
+    const started = performance.now()
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), this.options.timeoutMs ?? 45000)
+    const metric: Metric = { path, durationMs: 0, attempt: 1 }
+    this.metrics.push(metric)
+    let responseError: string | undefined
+    try {
+      const cookie = await this.jar.getCookieString(url)
+      const response = await (this.options.fetchImpl || fetch)(url, {
+        method: fields ? 'POST' : 'GET',
+        redirect: 'manual',
+        signal: this.options.signal
+          ? AbortSignal.any([controller.signal, this.options.signal])
+          : controller.signal,
+        headers: {
+          ...(cookie ? { cookie } : {}),
+          ...(fields ? { 'content-type': 'application/x-www-form-urlencoded' } : {}),
+        },
+        ...(fields ? { body: new URLSearchParams(fields).toString() } : {}),
+      })
+      metric.status = response.status
+      for (const value of response.headers.getSetCookie()) await this.jar.setCookie(value, url)
+      // Do not follow redirects; every non-success response is one acquisition failure.
+      if (!response.ok) throw new AcquisitionError('http-error')
+      const bytes = await response.arrayBuffer()
+      if (bytes.byteLength > 2_000_000) throw new AcquisitionError('response-too-large')
+      let text: string
       try {
-        const cookie = await this.jar.getCookieString(url)
-        const response = await (this.options.fetchImpl || fetch)(url, {
-          method: fields ? 'POST' : 'GET',
-          redirect: 'manual',
-          signal: this.options.signal
-            ? AbortSignal.any([controller.signal, this.options.signal])
-            : controller.signal,
-          headers: {
-            ...(cookie ? { cookie } : {}),
-            ...(fields ? { 'content-type': 'application/x-www-form-urlencoded' } : {}),
-          },
-          ...(fields ? { body: new URLSearchParams(fields).toString() } : {}),
-        })
-        metric.status = response.status
-        for (const value of response.headers.getSetCookie()) await this.jar.setCookie(value, url)
-        // Reject redirects rather than silently following a login/error route.
-        if (response.status >= 300 && response.status < 400)
-          throw new AcquisitionError('unexpected-redirect')
-        if (response.status === 403 || response.status === 429)
-          throw new AcquisitionError('access-blocked')
-        if (!response.ok)
-          throw new AcquisitionError(response.status >= 500 ? 'server-error' : 'http-error')
-        const bytes = await response.arrayBuffer()
-        if (bytes.byteLength > 2_000_000) throw new AcquisitionError('response-too-large')
-        let text: string
-        try {
-          text = new TextDecoder('shift_jis', { fatal: true }).decode(bytes)
-        } catch {
-          throw new AcquisitionError('invalid-encoding')
-        }
-        if (/<html[\s>]/i.test(text) && text.includes('セッションタイムアウトが発生しました。'))
-          throw new AcquisitionError('session-expired')
-        return text
-      } catch (error) {
-        const classified =
-          error instanceof AcquisitionError
-            ? error
-            : new AcquisitionError(
-                this.options.signal?.aborted
-                  ? 'interrupted'
-                  : controller.signal.aborted
-                    ? 'timeout'
-                    : 'network-error',
-              )
-        responseError = classified.kind
-        if (attempt === 0 && ['network-error', 'timeout', 'server-error'].includes(classified.kind))
-          continue
-        throw classified
-      } finally {
-        clearTimeout(timer)
-        metric.durationMs = Math.round(performance.now() - started)
-        await checkpoint(this.options, this.state, {
-          kind: 'response',
-          error: responseError,
-          uncertain: ['network-error', 'timeout', 'interrupted'].includes(responseError ?? ''),
-        })
-        await this.options.onProgress?.(this.metrics.length)
+        text = new TextDecoder('shift_jis', { fatal: true }).decode(bytes)
+      } catch {
+        throw new AcquisitionError('invalid-encoding')
       }
+      if (/<html[\s>]/i.test(text) && text.includes('セッションタイムアウトが発生しました。'))
+        throw new AcquisitionError('session-expired')
+      return text
+    } catch (error) {
+      const classified =
+        error instanceof AcquisitionError
+          ? error
+          : new AcquisitionError(
+              this.options.signal?.aborted
+                ? 'interrupted'
+                : controller.signal.aborted
+                  ? 'timeout'
+                  : 'network-error',
+            )
+      responseError = classified.kind
+      throw classified
+    } finally {
+      clearTimeout(timer)
+      metric.durationMs = Math.round(performance.now() - started)
+      await checkpoint(this.options, this.state, {
+        kind: 'response',
+        error: responseError,
+        uncertain: ['network-error', 'timeout', 'interrupted'].includes(responseError ?? ''),
+      })
+      await this.options.onProgress?.(this.metrics.length)
     }
-    throw new AcquisitionError('network-error')
   }
 }
 
