@@ -54,12 +54,7 @@ test(
           await reset()
           await privateSession()
           const before = await saved()
-          for (const command of [
-            'resume',
-            'session-disable',
-            'session-discard',
-            'session-recover',
-          ] as const) {
+          for (const command of ['resume', 'session-clear'] as const) {
             assert.equal((await admin.execute(command)).applied, false)
             assert.equal(await saved(), before)
           }
@@ -84,20 +79,14 @@ test(
           await admin.execute('pause', { apply: true })
           await assert.rejects(store.gate(claim), /updates-disabled/)
           await assert.rejects(store.heartbeat(claim), /updates-disabled/)
-          for (const command of [
-            'resume',
-            'clear-block',
-            'session-disable',
-            'session-discard',
-            'session-recover',
-          ] as const)
+          for (const command of ['resume', 'session-clear'] as const)
             await assert.rejects(
               admin.execute(command, { apply: true, confirmWorkerStopped: true }),
               /worker-not-released/,
             )
           now = new Date(now.getTime() + 90001)
           await assert.rejects(
-            admin.execute('session-recover', { apply: true, confirmWorkerStopped: true }),
+            admin.execute('session-clear', { apply: true, confirmWorkerStopped: true }),
             /worker-not-released/,
           )
           await store.claim(task)
@@ -106,48 +95,26 @@ test(
         },
       )
       await t.test(
-        'disable preserves Cookie and cooldown; reset requires explicit stopped-worker confirmation',
-        async () => {
-          await reset()
-          await privateSession()
-          const cookie = (await session.get()).get('cookieJar')
-          await admin.execute('session-disable', { apply: true })
-          assert.deepEqual((await session.get()).get('cookieJar'), cookie)
-          assert.equal((await session.get()).get('restorationState'), 'disabled')
-          await assert.rejects(
-            admin.execute('resume', { apply: true }),
-            /session-recovery-required/,
-          )
-          await assert.rejects(
-            admin.execute('clear-block', { apply: true }),
-            /session-recovery-required/,
-          )
-          const before = await saved()
-          await assert.rejects(
-            admin.execute('session-discard', { apply: true }),
-            /confirmation-required/,
-          )
-          await assert.rejects(
-            admin.execute('session-recover', { apply: true }),
-            /confirmation-required/,
-          )
-          assert.equal(await saved(), before)
-        },
-      )
-      await t.test(
-        'discard and recover clear Cookie and prepared state, but retain official blocks and longer waiting times',
+        'clear removes Cookie/preparation, retains waiting and diagnostic reason; resume performs the only release',
         async () => {
           await reset()
           await privateSession()
           const later = Timestamp.fromMillis(now.getTime() + 1800000)
           await session.update({
             initializationRetryAt: later,
-            initializationError: 'access-blocked',
+            initializationError: 'invalid-home',
           })
-          await control.update({ blockedReason: 'access-blocked', nextRequestNotBefore: later })
+          await control.update({
+            blockedReason: 'session-recovery-required',
+            nextRequestNotBefore: later,
+          })
           await db.doc('scopes/preserved').set({ cooldownUntil: later })
           await db.doc('usage/preserved').set({ newJobCount: 50 })
-          for (const command of ['session-discard', 'session-recover'] as const) {
+          {
+            const command = 'session-clear' as const
+            const before = await saved()
+            await assert.rejects(admin.execute(command, { apply: true }), /confirmation-required/)
+            assert.equal(await saved(), before)
             const previous = (await session.get()).get('sessionGeneration')
             await admin.execute(command, { apply: true, confirmWorkerStopped: true })
             const current = await session.get()
@@ -158,24 +125,24 @@ test(
             assert.equal(current.get('initialized'), false)
             assert.equal(current.get('inFlight'), null)
             assert.equal(current.get('initializationRetryAt').toMillis(), later.toMillis())
-            assert.equal(current.get('initializationError'), 'access-blocked')
-            assert.equal((await control.get()).get('blockedReason'), 'access-blocked')
+            assert.equal(current.get('initializationError'), 'invalid-home')
+            assert.equal((await control.get()).get('blockedReason'), 'session-recovery-required')
             assert.equal((await control.get()).get('updatesEnabled'), false)
           }
-          await assert.rejects(admin.execute('resume', { apply: true }), /clear-block-required/)
-          await admin.execute('clear-block')
-          assert.equal((await control.get()).get('blockedReason'), 'access-blocked')
-          await admin.execute('clear-block', { apply: true })
           await assert.rejects(admin.execute('resume', { apply: true }), /cooldown-active/)
           now = new Date(later.toMillis())
           await admin.execute('resume', { apply: true })
           assert.equal((await control.get()).get('updatesEnabled'), true)
+          assert.equal((await control.get()).get('blockedReason'), null)
           assert.equal(
             (await db.doc('scopes/preserved').get()).get('cooldownUntil').toMillis(),
             later.toMillis(),
           )
           assert.equal((await db.doc('usage/preserved').get()).get('newJobCount'), 50)
-          await assert.rejects(admin.execute('session-disable', { apply: true }), /pause-required/)
+          await assert.rejects(
+            admin.execute('session-clear', { apply: true, confirmWorkerStopped: true }),
+            /pause-required/,
+          )
         },
       )
       await t.test(
@@ -191,7 +158,7 @@ test(
           assert.equal(status.restorationState, 'invalid')
           assert.doesNotMatch(JSON.stringify(status), /private/)
           await assert.rejects(admin.execute('resume', { apply: true }))
-          await admin.execute('session-recover', { apply: true, confirmWorkerStopped: true })
+          await admin.execute('session-clear', { apply: true, confirmWorkerStopped: true })
           assert.equal((await admin.status()).sessionUsable, true)
           assert.equal(
             (await session.get()).get('initializationRetryAt').toMillis(),
@@ -200,19 +167,19 @@ test(
           await session.update({ schemaVersion: 999 })
           const before = await saved()
           await assert.rejects(
-            admin.execute('session-recover', { apply: true, confirmWorkerStopped: true }),
+            admin.execute('session-clear', { apply: true, confirmWorkerStopped: true }),
             /invalid-admin-state/,
           )
           assert.equal(await saved(), before)
         },
       )
       await t.test(
-        'concurrent resume and disable cannot leave an enabled app with an unusable session',
+        'concurrent resume and clear cannot enable acquisition before the waiting deadline',
         async () => {
           await reset()
           const outcomes = await Promise.allSettled([
             admin.execute('resume', { apply: true }),
-            admin.execute('session-disable', { apply: true }),
+            admin.execute('session-clear', { apply: true, confirmWorkerStopped: true }),
           ])
           assert.equal(outcomes.filter((outcome) => outcome.status === 'fulfilled').length, 1)
           const status = await admin.status()

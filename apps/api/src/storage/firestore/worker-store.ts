@@ -139,13 +139,14 @@ export class WorkerStore {
             owner: null,
             leaseUntil: null,
             fence: control.fence + 1,
+            updatesEnabled: false,
             blockedReason: control.blockedReason ?? 'session-recovery-required',
             nextRequestNotBefore: until,
           })
           if (sessionDoc.exists) tx.update(sessionRef, { restorationState: 'recovery_required' })
           return { claim: null }
         }
-        if (!control.updatesEnabled || control.blockedReason !== null) {
+        if (!control.updatesEnabled) {
           await this.endQueued(tx, task, scopeRef, control.blockedReason ?? 'updates_disabled')
           return { claim: null }
         }
@@ -170,7 +171,10 @@ export class WorkerStore {
             cooldownUntil: until,
           })
           tx.update(scopeRef, { cooldownUntil: until })
-          tx.update(controlRef, { blockedReason: 'session-recovery-required' })
+          tx.update(controlRef, {
+            updatesEnabled: false,
+            blockedReason: 'session-recovery-required',
+          })
           if (sessionDoc.exists)
             tx.update(sessionDoc.ref, { restorationState: 'recovery_required' })
           return { claim: null }
@@ -210,7 +214,7 @@ export class WorkerStore {
         )
         const now = this.now()
         this.assertOwned(claim, job, control, now)
-        if (!control.updatesEnabled || control.blockedReason !== null) fail('updates-disabled')
+        if (!control.updatesEnabled) fail('updates-disabled')
         return Math.max(0, control.nextRequestNotBefore.toMillis() - now.getTime())
       },
       { readOnly: true },
@@ -224,7 +228,7 @@ export class WorkerStore {
         const control = parseValue(ControlSchema, (await tx.get(controlRef)).data(), invalid)
         const now = this.now()
         this.assertOwned(claim, job, control, now)
-        if (!control.updatesEnabled || control.blockedReason !== null) fail('updates-disabled')
+        if (!control.updatesEnabled) fail('updates-disabled')
         const leaseUntil = Timestamp.fromMillis(now.getTime() + 90000)
         tx.update(controlRef, { leaseUntil })
         tx.update(ref, { leaseUntil, ...(requestCount === undefined ? {} : { requestCount }) })
@@ -250,9 +254,7 @@ export class WorkerStore {
         if (scope.latestJobId !== claim.jobId) throw invalid()
         const release = await new JobRepository(this.db).prepareCapacityRelease(tx, claim.jobId)
         let errorCode = result.state === 'failed' ? result.error : null
-        if (!control.updatesEnabled) errorCode = 'updates_disabled'
-        else if (control.blockedReason !== null && errorCode !== 'access-blocked')
-          errorCode = control.blockedReason
+        if (!control.updatesEnabled) errorCode = errorCode ?? 'updates_disabled'
         const uncertain =
           session.inFlight !== null ||
           session.restorationState !== 'usable' ||
@@ -279,9 +281,11 @@ export class WorkerStore {
           owner: null,
           leaseUntil: null,
           ...(uncertain
-            ? { blockedReason: control.blockedReason ?? 'session-recovery-required' }
+            ? {
+                updatesEnabled: false,
+                blockedReason: control.blockedReason ?? 'session-recovery-required',
+              }
             : {}),
-          ...(errorCode === 'access-blocked' ? { blockedReason: 'access-blocked' } : {}),
         })
         if (uncertain) tx.update(sessionRef, { restorationState: 'recovery_required' })
       },

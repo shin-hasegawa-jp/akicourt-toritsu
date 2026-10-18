@@ -22,8 +22,7 @@ export function parseFirestoreArguments(args: string[]) {
       if (apply || command === 'status') throw new Error('invalid-arguments')
       apply = true
     } else if (flag === '--confirm-worker-stopped') {
-      if (confirmWorkerStopped || !['session-discard', 'session-recover'].includes(command))
-        throw new Error('invalid-arguments')
+      if (confirmWorkerStopped || command !== 'session-clear') throw new Error('invalid-arguments')
       confirmWorkerStopped = true
     } else {
       if (
@@ -102,7 +101,7 @@ if (require.main === module) {
       if (error instanceof AdministrationError)
         console.error(`Firestore administration refused: ${error.message}`)
       console.error(
-        'Firestore command failed. Check explicit project/database, emulator settings and initialization state. Commands: initialize | seed-reference-data | status | repair-outbox | pause | resume | clear-block | session-disable | session-discard | session-recover; writes require --apply. Session discard/recover also require --confirm-worker-stopped after confirming the old worker has stopped.',
+        'Firestore command failed. Check explicit project/database, emulator settings and initialization state. Commands: initialize | seed-reference-data | status | repair-outbox | pause | resume | session-clear; writes require --apply. Session clear also requires --confirm-worker-stopped after confirming the old worker has stopped.',
       )
       process.exitCode = 1
     },

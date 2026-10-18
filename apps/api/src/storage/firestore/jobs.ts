@@ -57,7 +57,7 @@ export class JobRepository {
         const usage = usageDoc.exists
           ? parseValue(UsageSchema, usageDoc.data(), invalid)
           : undefined
-        if (!control.updatesEnabled || control.blockedReason !== null)
+        if (!control.updatesEnabled)
           throw new ApiError(503, 'worker_unavailable', '更新受付は停止しています。')
         const scopes = await tx.getAll(...ids.map((id) => this.db.doc(`scopes/${id}`)))
         const parks = await tx.getAll(

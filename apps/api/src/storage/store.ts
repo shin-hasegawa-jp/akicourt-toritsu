@@ -223,8 +223,6 @@ export class Store {
           result.durationMs,
         ],
       )
-      if (result.state === 'failed' && result.error === 'access-blocked')
-        await client.query(`UPDATE worker_lease SET blocked_reason='access-blocked' WHERE id=1`)
     })
   }
   async resetBlock(): Promise<void> {

@@ -1,6 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises'
 import { performance } from 'node:perf_hooks'
-import { acquire, Result } from '../availability/client'
+import { acquire, Result, Target } from '../availability/client'
 import { AcquisitionError } from '../availability/parser'
 import { DispatchJob } from '../storage/firestore/jobs'
 import { OfficialSessionRepository } from '../storage/firestore/official-session'
@@ -8,14 +8,25 @@ import { WorkerStore } from '../storage/firestore/worker-store'
 
 type Timing = { abortMs: number; deadlineMs: number; heartbeatMs: number; storageMs: number }
 const timing: Timing = { abortMs: 830000, deadlineMs: 839000, heartbeatMs: 20000, storageMs: 5000 }
+export type FailureLog = {
+  severity: 'ERROR'
+  event: 'acquisition-failed' | 'worker-unavailable'
+  jobId: string
+  generation: number
+  target?: Target
+  phase: 'claim' | 'session' | 'home' | 'facility' | 'week' | 'storage'
+  reason: string
+  httpStatus?: number
+}
 type Dependencies = {
+  logFailure?: (event: FailureLog) => void
   fetchImpl?: typeof fetch
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>
   timing?: Timing
 }
 const businessError = (error: unknown) =>
   error instanceof AcquisitionError &&
-  ['updates-disabled', 'session-recovery-required', 'access-blocked'].includes(error.kind)
+  ['updates-disabled', 'session-recovery-required'].includes(error.kind)
 
 // Run inside the task's HTTP lifetime. No acquisition is scheduled after the reply.
 export class AcquisitionWorker {
@@ -34,6 +45,10 @@ export class AcquisitionWorker {
     let renewal: Promise<void> | undefined
     let heartbeat: ReturnType<typeof setInterval> | undefined
     let requestCount = 0
+    let target: Target | undefined
+    let phase: FailureLog['phase'] = 'claim'
+    const log =
+      this.dependencies.logFailure ?? ((event: FailureLog) => console.error(JSON.stringify(event)))
     // SDK operations cannot be cancelled. On timeout, stop this invocation;
     // a late commit is fenced, or leaves an unpublished snapshot / leased job.
     const io = async <T>(operation: () => Promise<T>): Promise<T> => {
@@ -68,6 +83,8 @@ export class AcquisitionWorker {
       signal.throwIfAborted()
       const claim = await io(() => this.store.claim(task))
       if (!claim) return
+      target = claim.target
+      phase = 'session'
       const failed = (error: string): Result => ({
         target: claim.target,
         parkName: claim.parkName,
@@ -116,11 +133,31 @@ export class AcquisitionWorker {
         if (!signal.aborted && !businessError(error)) throw error
         result = failed(error instanceof AcquisitionError ? error.kind : 'interrupted')
       }
+      if (
+        result.state === 'failed' &&
+        ![
+          'invalid-home',
+          'interrupted',
+          'updates-disabled',
+          'session-recovery-required',
+          'session-checkpoint-failed',
+        ].includes(result.error)
+      )
+        result = { ...result, error: 'acquisition-failed' }
+      const lastRequest = result.requests.at(-1)
+      if (lastRequest)
+        phase =
+          lastRequest.path === '/web/'
+            ? 'home'
+            : lastRequest.path.includes('Ajax')
+              ? 'week'
+              : 'facility'
       if (infrastructureFailure) throw new Error('worker-storage-unavailable')
       if (signal.aborted && result.state === 'success')
         result = { ...result, state: 'failed', error: 'interrupted' }
       let snapshotId: string | undefined
       if (result.state === 'success') {
+        phase = 'storage'
         try {
           const success = result
           snapshotId = (await io(() => this.store.snapshots.stage(success))).snapshotId
@@ -137,6 +174,26 @@ export class AcquisitionWorker {
       if (signal.aborted && result.state === 'success')
         result = { ...result, state: 'failed', error: 'interrupted' }
       await io(() => this.store.finish(claim, result, snapshotId))
+      if (result.state === 'failed')
+        log({
+          severity: 'ERROR',
+          event: 'acquisition-failed',
+          ...task,
+          target,
+          phase,
+          reason: result.error,
+          httpStatus: lastRequest?.status,
+        })
+    } catch (error) {
+      log({
+        severity: 'ERROR',
+        event: 'worker-unavailable',
+        ...task,
+        target,
+        phase: infrastructureFailure ? 'storage' : phase,
+        reason: 'worker-unavailable',
+      })
+      throw error
     } finally {
       clearTimeout(abortTimer)
       clearInterval(heartbeat)

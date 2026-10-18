@@ -129,7 +129,10 @@ test(
       await t.test(
         'paused and globally blocked deliveries terminate without acquiring a session',
         async () => {
-          for (const stopped of [{ updatesEnabled: false }, { blockedReason: 'access-blocked' }]) {
+          for (const stopped of [
+            { updatesEnabled: false },
+            { updatesEnabled: false, blockedReason: 'manual-pause' },
+          ]) {
             await reset()
             const task = await enqueue()
             const revision = (await session.get()).get('revision')
@@ -179,14 +182,12 @@ test(
       await t.test(
         'aborted or uncertain result blocks reuse; paused/blocked completion never publishes',
         async () => {
-          for (const error of ['interrupted', 'session-checkpoint-failed', 'access-blocked']) {
+          for (const error of ['interrupted', 'session-checkpoint-failed']) {
             await reset()
             const owned = await claim()
             await store.finish(owned, failure(error))
-            assert.equal(
-              (await control.get()).get('blockedReason'),
-              error === 'access-blocked' ? error : 'session-recovery-required',
-            )
+            assert.equal((await control.get()).get('blockedReason'), 'session-recovery-required')
+            assert.equal((await control.get()).get('updatesEnabled'), false)
             assert.equal((await queue.get()).get('pendingJobCount'), 0)
             assert.equal((await scope.get()).get('latestSnapshotId'), null)
           }

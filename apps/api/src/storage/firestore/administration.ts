@@ -11,14 +11,7 @@ import {
   Versioned,
 } from './schemas'
 
-export const adminCommands = [
-  'pause',
-  'resume',
-  'clear-block',
-  'session-disable',
-  'session-discard',
-  'session-recover',
-] as const
+export const adminCommands = ['pause', 'resume', 'session-clear'] as const
 export type AdminCommand = (typeof adminCommands)[number]
 const Metadata = v.looseObject({
   ...Versioned.entries,
@@ -29,8 +22,6 @@ const Metadata = v.looseObject({
 })
 export class AdministrationError extends Error {}
 const invalid = () => new AdministrationError('invalid-admin-state')
-const resetSession = (command: AdminCommand) =>
-  command === 'session-discard' || command === 'session-recover'
 function usable(session: v.InferOutput<typeof SessionDocumentSchema>, now: Date) {
   if (session.restorationState !== 'usable' || session.inFlight !== null)
     throw new AdministrationError('session-recovery-required')
@@ -66,7 +57,8 @@ export class Administration {
         const control = parseValue(ControlSchema, (await tx.get(controlRef)).data(), invalid)
         if (command === 'pause') {
           const changed = control.updatesEnabled
-          if (apply && changed) tx.update(controlRef, { updatesEnabled: false })
+          if (apply && changed)
+            tx.update(controlRef, { updatesEnabled: false, blockedReason: 'manual-pause' })
           return { action: command, changed, applied: apply && changed }
         }
         const now = this.now()
@@ -79,39 +71,32 @@ export class Administration {
         const ref = this.db.doc('officialSessions/current')
         const doc = await tx.get(ref)
         const session =
-          command === 'resume' || command === 'clear-block'
-            ? parseValue(SessionDocumentSchema, doc.data(), invalid)
-            : null
+          command === 'resume' ? parseValue(SessionDocumentSchema, doc.data(), invalid) : null
         const metadata = session ?? parseValue(Metadata, doc.data(), invalid)
         if (session) {
           usable(session, now)
-          if (command === 'resume') {
-            parseValue(
-              QueueSchema,
-              (await tx.get(this.db.doc('control/queueCapacity'))).data(),
-              invalid,
-            )
-            if (control.blockedReason !== null)
-              throw new AdministrationError('clear-block-required')
-            if (
-              Math.max(
-                control.nextRequestNotBefore.toMillis(),
-                metadata.initializationRetryAt.toMillis(),
-              ) > now.getTime()
-            )
-              throw new AdministrationError('cooldown-active')
+          parseValue(
+            QueueSchema,
+            (await tx.get(this.db.doc('control/queueCapacity'))).data(),
+            invalid,
+          )
+          if (
+            Math.max(
+              control.nextRequestNotBefore.toMillis(),
+              metadata.initializationRetryAt.toMillis(),
+            ) > now.getTime()
+          )
+            throw new AdministrationError('cooldown-active')
+          const changed = !control.updatesEnabled
+          if (apply && changed) tx.update(controlRef, { updatesEnabled: true, blockedReason: null })
+          return {
+            action: command,
+            changed,
+            applied: apply && changed,
+            previousStopReason: control.blockedReason,
           }
-          const changed =
-            command === 'resume' ? !control.updatesEnabled : control.blockedReason !== null
-          if (apply && changed)
-            tx.update(
-              controlRef,
-              command === 'resume' ? { updatesEnabled: true } : { blockedReason: null },
-            )
-          return { action: command, changed, applied: apply && changed }
         }
-        const resetting = resetSession(command)
-        if (apply && resetting && !options.confirmWorkerStopped)
+        if (apply && !options.confirmWorkerStopped)
           throw new AdministrationError('worker-stopped-confirmation-required')
         const until = Timestamp.fromMillis(
           Math.max(
@@ -122,33 +107,28 @@ export class Administration {
         )
         if (apply) {
           tx.update(ref, {
-            restorationState: command === 'session-recover' ? 'usable' : 'disabled',
+            restorationState: 'usable',
             revision: metadata.revision + 1,
-            ...(resetting
-              ? {
-                  cookieJar: new CookieJar().serializeSync(),
-                  initialized: false,
-                  prepared: [],
-                  targets: [],
-                  inFlight: null,
-                  sessionGeneration: metadata.sessionGeneration + 1,
-                  initializationRetryAt: until,
-                }
-              : {}),
+            cookieJar: new CookieJar().serializeSync(),
+            initialized: false,
+            prepared: [],
+            targets: [],
+            inFlight: null,
+            sessionGeneration: metadata.sessionGeneration + 1,
+            initializationRetryAt: until,
           })
           tx.update(controlRef, {
             fence: control.fence + 1,
-            // Session operations never remove an official access block.
-            blockedReason: control.blockedReason ?? 'session-recovery-required',
-            ...(resetting ? { nextRequestNotBefore: until } : {}),
+            // Clearing a session never resumes acquisition or shortens a cooldown.
+            nextRequestNotBefore: until,
           })
         }
         return {
           action: command,
           changed: true,
           applied: apply,
-          requiresWorkerStoppedConfirmation: resetting,
-          ...(resetting ? { retryNotBefore: until.toDate().toISOString() } : {}),
+          requiresWorkerStoppedConfirmation: true,
+          retryNotBefore: until.toDate().toISOString(),
         }
       },
       { maxAttempts: 3 },
@@ -194,6 +174,7 @@ export class Administration {
           initializationRetryAt: metadata?.initializationRetryAt.toDate().toISOString() ?? null,
           nextRequestNotBefore: control.nextRequestNotBefore.toDate().toISOString(),
           leaseUntil: control.leaseUntil?.toDate().toISOString() ?? null,
+          ownershipReleased: control.owner === null && control.leaseUntil === null,
           inFlight: session.success ? session.output.inFlight !== null : null,
         }
       },

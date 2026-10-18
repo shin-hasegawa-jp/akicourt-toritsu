@@ -134,7 +134,7 @@ test(
           assert.deepEqual(JSON.parse(child.stdout), { state: 'success', calls: 1 })
         },
       )
-      await t.test('5xx retry persists changed cookies before the next HTTP request', async () => {
+      await t.test('non-success HTTP persists changed cookies without retry', async () => {
         now = new Date(now.getTime() + 2000)
         const loaded = await repository.load(ownership)
         let calls = 0
@@ -157,9 +157,10 @@ test(
               sleep,
             })
           )[0].state,
-          'success',
+          'failed',
         )
-        assert.equal(calls, 2)
+        assert.equal(calls, 1)
+        assert.match(JSON.stringify((await ref.get()).get('cookieJar')), /rotated/)
       })
       await t.test(
         'old revision, expired lease and old owner cannot overwrite the saved session',
@@ -246,7 +247,10 @@ test(
               await loaded.checkpoint(loaded.state, { kind: 'response', uncertain: false })
             } else if (scenario === 'schema') await ref.update({ schemaVersion: 999 })
             else await ref.delete()
-            await assert.rejects(repository.load(ownership), /session-recovery-required/)
+            await assert.rejects(
+              repository.load(ownership),
+              /session-recovery-required|updates-disabled/,
+            )
             if (scenario !== 'missing')
               assert.equal((await ref.get()).get('restorationState'), 'recovery_required')
           }
@@ -255,7 +259,7 @@ test(
         },
       )
       await t.test(
-        'initialization failure is shared and 403 preserves the global block',
+        'initialization failure is shared and non-success HTTP does not pause globally',
         async () => {
           const clean = (await ref.get()).data()!
           await ref.update({ initialized: false, prepared: [], targets: [] })
@@ -290,8 +294,9 @@ test(
             fetchImpl: async () => new Response('', { status: 403 }),
             sleep,
           })
-          assert.equal((await control.get()).get('blockedReason'), 'access-blocked')
-          await assert.rejects(repository.load(ownership), /updates-disabled/)
+          assert.equal((await control.get()).get('blockedReason'), null)
+          assert.equal((await control.get()).get('updatesEnabled'), true)
+          await repository.load(ownership)
           await claim()
         },
       )
@@ -318,7 +323,10 @@ test(
             result.every((r) => r.state === 'failed' && r.error === 'session-checkpoint-failed'),
           )
           assert.ok(!JSON.stringify(result).includes('private-cookie'))
-          await assert.rejects(repository.load(ownership), /session-recovery-required/)
+          await assert.rejects(
+            repository.load(ownership),
+            /session-recovery-required|updates-disabled/,
+          )
           assert.equal((await ref.get()).get('restorationState'), 'recovery_required')
         },
       )

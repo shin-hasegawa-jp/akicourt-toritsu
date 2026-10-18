@@ -36,17 +36,10 @@ test('Firestore CLI requires explicit destination and defaults to dry-run', () =
   assert.equal(parseFirestoreArguments(args).apply, false)
   assert.equal(parseFirestoreArguments(['repair-outbox', ...args.slice(1)]).apply, false)
   assert.equal(parseFirestoreArguments([...args, '--apply']).apply, true)
-  for (const command of [
-    'pause',
-    'resume',
-    'clear-block',
-    'session-disable',
-    'session-discard',
-    'session-recover',
-  ])
+  for (const command of ['pause', 'resume', 'session-clear'])
     assert.equal(parseFirestoreArguments([command, ...args.slice(1)]).apply, false)
   assert.equal(
-    parseFirestoreArguments(['session-recover', ...args.slice(1), '--confirm-worker-stopped'])
+    parseFirestoreArguments(['session-clear', ...args.slice(1), '--confirm-worker-stopped'])
       .confirmWorkerStopped,
     true,
   )
@@ -57,8 +50,12 @@ test('Firestore CLI requires explicit destination and defaults to dry-run', () =
     ['status', ...args.slice(1), '--apply'],
     [...args, '--unknown'],
     ['reset', ...args.slice(1)],
+    ...['clear-block', 'session-disable', 'session-discard', 'session-recover'].map((command) => [
+      command,
+      ...args.slice(1),
+    ]),
     ['resume', ...args.slice(1), '--confirm-worker-stopped'],
-    ['session-recover', ...args.slice(1), '--confirm-worker-stopped', '--confirm-worker-stopped'],
+    ['session-clear', ...args.slice(1), '--confirm-worker-stopped', '--confirm-worker-stopped'],
   ])
     assert.throws(() => parseFirestoreArguments(invalid))
 })

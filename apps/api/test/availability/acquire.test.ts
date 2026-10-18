@@ -186,8 +186,8 @@ test('a failed target is distinct and the next target can succeed', async () => 
   assert.equal(results[1]?.state, 'success')
 })
 
-test('retry server errors once; never retry forbidden or redirects', async () => {
-  for (const status of [503, 403, 302]) {
+test('non-success HTTP responses fail once without status-specific recovery', async () => {
+  for (const status of [503, 403, 429, 302]) {
     let calls = 0
     const fetchImpl: typeof fetch = async () => {
       calls++
@@ -195,11 +195,11 @@ test('retry server errors once; never retry forbidden or redirects', async () =>
     }
     const [result] = await acquire([target], { ...options, fetchImpl })
     assert.equal(result?.state, 'failed')
-    assert.equal(calls, status === 503 ? 2 : 1)
+    assert.equal(calls, 1)
   }
 })
 
-test('timeout includes response body and retries are bounded', async () => {
+test('timeout includes response body and never retries immediately', async () => {
   let calls = 0
   const fetchImpl: typeof fetch = async (_url, init) => {
     calls++
@@ -221,7 +221,7 @@ test('timeout includes response body and retries are bounded', async () => {
   })
   assert.equal(result?.state, 'failed')
   if (result?.state === 'failed') assert.equal(result.error, 'timeout')
-  assert.equal(calls, 2)
+  assert.equal(calls, 1)
 })
 
 test('reusable session keeps cookies and facility IDs across jobs with per-job metrics', async () => {
