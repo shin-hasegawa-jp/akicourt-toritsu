@@ -3,9 +3,13 @@ const assert = require('node:assert/strict')
 const { execFileSync } = require('node:child_process')
 const { setTimeout: delay } = require('node:timers/promises')
 
-const image = process.argv[2]
-assert.ok(image, 'Pass the image tag to check')
-const docker = (...args) => execFileSync('docker', args, { encoding: 'utf8', timeout: 30000 })
+const image = 'akicourt-production:check'
+const docker = (...args) => {
+  const options = { encoding: 'utf8', timeout: 30000 }
+  return process.platform === 'darwin'
+    ? execFileSync('/usr/local/bin/docker', args, options)
+    : execFileSync('/usr/bin/docker', args, options)
+}
 const containers = []
 async function main() {
   assert.equal(docker('image', 'inspect', '--format', '{{.Architecture}}', image).trim(), 'amd64')

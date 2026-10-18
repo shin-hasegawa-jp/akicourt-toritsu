@@ -112,8 +112,8 @@ API全体の待機は30秒、Firestore処理の待機は10秒、画面は35秒�
 API/worker共通イメージは`apps/api/Dockerfile`でビルドする。ビルド段階でTypeScriptをコンパイルし、実行段階は本番依存とdistを配置して非rootユーザーで起動する。
 
 ```sh
-docker build --platform linux/amd64 -t akicourt-toritsu:release-check -f apps/api/Dockerfile apps/api
-node apps/api/scripts/check-production-image.cjs akicourt-toritsu:release-check
+docker build --platform linux/amd64 -t akicourt-production:check -f apps/api/Dockerfile apps/api
+node apps/api/scripts/check-production-image.cjs
 ```
 
 検証スクリプトは外部ネットワークなし・読取専用の一時コンテナでAPI/workerのhealth、不正入力、ルート分離、SIGTERM終了を確認し、コンテナを削除する。実DBや公式取得の検証は含まない。

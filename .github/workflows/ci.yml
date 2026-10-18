@@ -92,9 +92,9 @@ jobs:
         with:
           node-version-file: .nvmrc
       - name: Build release image
-        run: docker build --platform linux/amd64 -t akicourt-production:ci -f apps/api/Dockerfile apps/api
+        run: docker build --platform linux/amd64 -t akicourt-production:check -f apps/api/Dockerfile apps/api
       - name: Check API and worker without external access
-        run: node apps/api/scripts/check-production-image.cjs akicourt-production:ci
+        run: node apps/api/scripts/check-production-image.cjs
 
   firestore:
     name: Firestore
