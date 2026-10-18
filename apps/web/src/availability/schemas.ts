@@ -54,7 +54,7 @@ export const SearchSchema = v.object({
   dateFrom: date,
   dateTo: date,
   coverage: v.picklist(['complete', 'partial', 'none']),
-  scopes: v.pipe(v.array(ScopeSchema), v.minLength(1), v.maxLength(4)),
+  scopes: v.pipe(v.array(ScopeSchema), v.minLength(1), v.maxLength(10)),
   slots: v.pipe(v.array(SlotSchema), v.maxLength(10000)),
   officialUrl: v.literal('https://kouen.sports.metro.tokyo.lg.jp/web/'),
 })
@@ -72,7 +72,7 @@ export const JobSchema = v.object({
   reused: v.optional(v.boolean()),
 })
 export const UpdatesSchema = v.object({
-  jobs: v.pipe(v.array(JobSchema), v.minLength(1), v.maxLength(4)),
+  jobs: v.pipe(v.array(JobSchema), v.minLength(1), v.maxLength(10)),
   pollAfterSeconds: v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(60)),
 })
 export const ErrorSchema = v.object({ error: v.object({ code: v.string(), message: v.string() }) })
