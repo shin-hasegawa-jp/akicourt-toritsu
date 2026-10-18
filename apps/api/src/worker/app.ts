@@ -4,11 +4,11 @@ import { Id, NonNegativeInteger } from '../validation'
 import { DispatchJob } from '../storage/firestore/jobs'
 
 const Task = v.strictObject({ jobId: Id, generation: NonNegativeInteger })
-type Runner = { run(task: DispatchJob, signal: AbortSignal): Promise<void> }
+export type TaskRunner = { run(task: DispatchJob, signal: AbortSignal): Promise<void> }
 
 // Separate from public route autoload. Deploy only behind Cloud Run IAM;
-// Cloud Tasks headers are not authentication. Role selection is wired in FS-3.
-export function createWorkerApp(worker: Runner) {
+// Cloud Tasks headers are not authentication.
+export function createWorkerApp(worker: TaskRunner) {
   const app = Fastify({ bodyLimit: 1024 })
   const shutdown = new AbortController()
   const stop = () => {

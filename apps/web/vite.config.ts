@@ -20,7 +20,6 @@ export default defineConfig(({ mode, command }) => {
       proxy: {
         '/api': {
           target: env.API_PROXY_TARGET || 'http://127.0.0.1:17591',
-          rewrite: (path) => path.replace(/^\/api(?=\/|$)/, ''),
         },
       },
     },
