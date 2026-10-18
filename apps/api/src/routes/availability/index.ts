@@ -1,10 +1,10 @@
 import * as v from 'valibot'
 import { parseValue } from '../../validation'
 import { FastifyPluginAsync } from 'fastify'
-import { Pool } from 'pg'
-import parks from '../../storage/park-options'
-import { database } from '../../storage/database'
-import { AvailabilityService } from '../../availability-api/service'
+import { connectFirestore } from '../../storage/firestore/database'
+import { AdmissionError } from '../../storage/firestore/jobs'
+import { CloudTaskDispatcher } from '../../storage/firestore/task-dispatcher'
+import { FirestoreAvailabilityService } from '../../availability-api/firestore-service'
 import {
   ApiError,
   Input,
@@ -16,49 +16,51 @@ import {
 } from '../../availability-api/input'
 import { errorSchema, jobSchema, searchSchema, updateSchema } from '../../availability-api/schemas'
 
-// pool injection is used only by integration tests; normal startup owns its pool.
-const routes: FastifyPluginAsync<{ pool?: Pool }> = async (app, opts) => {
-  const pool = opts.pool ?? (process.env.DATABASE_URL ? database() : undefined)
-  if (pool && !opts.pool) {
-    const onError = () => app.log.error('availability database unavailable')
-    pool.on('error', onError)
-    app.addHook('onClose', async () => {
-      pool.removeListener('error', onError)
-      await pool.end()
-    })
-  }
+// Inject dependencies for isolated tests. Normal startup owns and closes its SDK clients.
+const routes: FastifyPluginAsync<{ service?: FirestoreAvailabilityService }> = async (
+  app,
+  opts,
+) => {
+  const projectId = process.env.GOOGLE_CLOUD_PROJECT
+  const db =
+    !opts.service && projectId
+      ? connectFirestore({
+          projectId,
+          databaseId: process.env.FIRESTORE_DATABASE_ID ?? '',
+        })
+      : undefined
+  if (db) app.addHook('onClose', () => db.terminate())
+  const cloudTasks =
+    db && process.env.NODE_ENV === 'production'
+      ? new CloudTaskDispatcher({
+          projectId: projectId ?? '',
+          location: process.env.TASKS_LOCATION ?? '',
+          queue: process.env.TASKS_QUEUE ?? '',
+          callerSA: process.env.TASKS_CALLER_SA ?? '',
+          workerUrl: process.env.WORKER_URL ?? '',
+        })
+      : undefined
+  if (cloudTasks) app.addHook('onClose', () => cloudTasks.close())
+  const backend =
+    opts.service ?? (db ? new FirestoreAvailabilityService(db, projectId!, cloudTasks) : undefined)
   const service = () => {
-    if (!pool) throw new ApiError(503, 'storage_unavailable', '保存先へ接続できません。')
-    return new AvailabilityService(pool)
+    if (!backend) throw new ApiError(503, 'storage_unavailable', '保存先へ接続できません。')
+    return backend
   }
+  app.addHook('onRequest', async (_request, reply) => {
+    reply.header('Cache-Control', 'no-store')
+  })
   app.setErrorHandler((error, _request, reply) => {
     const failure = error as { validation?: unknown; statusCode?: number; message?: string }
     let known = error instanceof ApiError ? error : undefined
     if (failure.validation || failure.statusCode === 400)
       known = new ApiError(400, 'invalid_request', '入力内容を確認してください。')
-    if (failure.message === 'unsupported-target')
-      known = new ApiError(400, 'invalid_request', '未対応の公園・種目です。')
-    if (['worker-blocked', 'worker-unavailable'].includes(failure.message || ''))
-      known = new ApiError(503, 'worker_unavailable', '取得ワーカーが停止しています。')
     const safe = known ?? new ApiError(503, 'storage_unavailable', '保存先を利用できません。')
+    if (error instanceof AdmissionError) reply.header('Retry-After', String(error.retryAfter))
     reply.code(safe.status).send({ error: { code: safe.code, message: safe.message } })
   })
-  const errors = { 400: errorSchema, 404: errorSchema, 503: errorSchema }
-  app.get('/parks', async () => ({
-    defaultTarget: parks.some((park) => park.parkId === '1280' && park.surface === 'grass')
-      ? '1280:grass'
-      : `${parks[0].parkId}:${parks[0].surface}`,
-    groups: (['hard', 'grass'] as const).map((surface) => ({
-      surface,
-      label: surface === 'hard' ? 'ハード' : '人工芝',
-      parks: parks
-        .filter((park) => park.surface === surface)
-        .map((park) => ({
-          parkId: park.parkId,
-          parkName: park.name,
-        })),
-    })),
-  }))
+  const errors = { 400: errorSchema, 404: errorSchema, 429: errorSchema, 503: errorSchema }
+  app.get('/parks', async () => service().parks())
 
   // Validate before AJV can coerce values or strip unknown fields.
   const validateBody = (schema: v.GenericSchema) => async (request: { body: unknown }) => {
