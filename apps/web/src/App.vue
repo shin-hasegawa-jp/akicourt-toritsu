@@ -6,6 +6,7 @@ import { restoreConditions, saveConditions } from './availability/preferences'
 import { useAvailability } from './availability/useAvailability'
 import ParkPicker from './components/ParkPicker.vue'
 
+const localAcquisition = import.meta.env.VITE_LOCAL_ACQUISITION
 const form = reactive(defaults())
 const preferenceMessage = ref('')
 const catalogReady = ref(parks.length > 0)
@@ -183,6 +184,13 @@ function parkName(id: string): string {
 
 <template>
   <main>
+    <p v-if="localAcquisition" role="status">
+      {{
+        localAcquisition === 'fixture'
+          ? 'ローカル検証：保存応答を対象週に合わせた検証データです。実際の空き状況ではありません。'
+          : 'ローカル検証：公式サイトへの実通信が有効です。'
+      }}
+    </p>
     <header class="page-header">
       <div>
         <p class="eyebrow">TOKYO PARK TENNIS</p>

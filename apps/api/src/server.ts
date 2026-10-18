@@ -1,3 +1,5 @@
+import { localSettings } from './local/settings'
+import { fixtureFetch } from './local/fixture-fetch'
 import Fastify from 'fastify'
 import * as v from 'valibot'
 import api from './app'
@@ -42,15 +44,16 @@ export function createRuntimeApp(role: 'api' | 'worker', worker?: TaskRunner) {
     return app
   }
   if (worker) return createWorkerApp(worker)
-  // Local fixture transport and delivery are wired in FS-3c. Do not silently
-  // start a local worker that contacts the official site during development.
-  if (process.env.NODE_ENV !== 'production') throw new Error('local-worker-not-configured')
+  const local = process.env.NODE_ENV !== 'production' ? localSettings() : undefined
+  if (!local && process.env.LOCAL_ACQUISITION !== undefined)
+    throw new Error('local-runtime-forbidden')
   const projectId = process.env.GOOGLE_CLOUD_PROJECT ?? ''
   const db = connectFirestore({ projectId, databaseId: process.env.FIRESTORE_DATABASE_ID ?? '' })
   const app = createWorkerApp(
     new AcquisitionWorker(
       new WorkerStore(db, projectId),
       new OfficialSessionRepository(db, projectId),
+      local?.mode === 'fixture' ? { fetchImpl: fixtureFetch() } : {},
     ),
   )
   app.addHook('onClose', () => db.terminate())

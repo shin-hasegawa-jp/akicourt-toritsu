@@ -1,3 +1,5 @@
+import { localSettings } from '../../local/settings'
+import { localDispatcher } from '../../local/delivery'
 import {
   RequestLimits,
   RequestKind,
@@ -35,6 +37,7 @@ const routes: FastifyPluginAsync<{
         })
       : undefined
   if (db) app.addHook('onClose', () => db.terminate())
+  const local = process.env.LOCAL_ACQUISITION !== undefined ? localSettings() : undefined
   const cloudTasks =
     db && process.env.NODE_ENV === 'production'
       ? new CloudTaskDispatcher({
@@ -47,7 +50,14 @@ const routes: FastifyPluginAsync<{
       : undefined
   if (cloudTasks) app.addHook('onClose', () => cloudTasks.close())
   const backend =
-    opts.service ?? (db ? new FirestoreAvailabilityService(db, projectId!, cloudTasks) : undefined)
+    opts.service ??
+    (db
+      ? new FirestoreAvailabilityService(
+          db,
+          projectId!,
+          cloudTasks ?? (local ? localDispatcher : undefined),
+        )
+      : undefined)
   const service = () => {
     if (!backend) throw new ApiError(503, 'storage_unavailable', '保存先へ接続できません。')
     return backend

@@ -20,9 +20,70 @@ services:
 
   api:
     environment:
+      LOCAL_ACQUISITION: ${LOCAL_ACQUISITION:-fixture}
       GOOGLE_CLOUD_PROJECT: demo-akicourt-local
       FIRESTORE_DATABASE_ID: (default)
       FIRESTORE_EMULATOR_HOST: firestore:8080
     depends_on:
       firestore:
         condition: service_healthy
+
+  worker:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile.dev
+    init: true
+    command: ["sh", "-c", "npm ci --ignore-scripts --no-audit --no-fund && npm run build:ts && exec node dist/server.js"]
+    environment:
+      APP_ROLE: worker
+      API_HOST: 0.0.0.0
+      PORT: 3000
+      LOCAL_ACQUISITION: ${LOCAL_ACQUISITION:-fixture}
+      GOOGLE_CLOUD_PROJECT: demo-akicourt-local
+      FIRESTORE_DATABASE_ID: (default)
+      FIRESTORE_EMULATOR_HOST: firestore:8080
+    volumes:
+      - ./apps/api:/app
+      - worker-node-modules:/app/node_modules
+      - worker-dist:/app/dist
+    depends_on:
+      firestore:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 120s
+    stop_grace_period: 30s
+
+  delivery:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile.dev
+    init: true
+    command: ["sh", "-c", "npm ci --ignore-scripts --no-audit --no-fund && npm run build:ts && exec node dist/local/delivery.js"]
+    environment:
+      LOCAL_ACQUISITION: ${LOCAL_ACQUISITION:-fixture}
+      LOCAL_WORKER_URL: http://worker:3000
+      GOOGLE_CLOUD_PROJECT: demo-akicourt-local
+      FIRESTORE_DATABASE_ID: (default)
+      FIRESTORE_EMULATOR_HOST: firestore:8080
+    volumes:
+      - ./apps/api:/app
+      - delivery-node-modules:/app/node_modules
+      - delivery-dist:/app/dist
+    depends_on:
+      worker:
+        condition: service_healthy
+    stop_grace_period: 30s
+
+  web:
+    environment:
+      VITE_LOCAL_ACQUISITION: ${LOCAL_ACQUISITION:-fixture}
+
+volumes:
+  worker-node-modules:
+  worker-dist:
+  delivery-node-modules:
+  delivery-dist:
