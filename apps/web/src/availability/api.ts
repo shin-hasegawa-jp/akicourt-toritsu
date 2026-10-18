@@ -7,7 +7,9 @@ export class RequestError extends Error {}
 const messages: Record<string, string> = {
   holiday_calendar_unavailable:
     '対象年の祝日情報が未登録です。曜日条件を変更して再検索してください。',
-  worker_unavailable: '取得ワーカーが停止しています。起動状態を確認して再試行してください。',
+  worker_unavailable: '更新受付は停止しています。時間をおいて再試行してください。',
+  request_timeout:
+    '処理に時間がかかっています。保存済み情報や進捗を確認し、必要に応じて再試行してください。',
   storage_unavailable: '保存先を利用できません。時間をおいて再試行してください。',
   invalid_request: '検索条件を確認してください。更新対象に過去の日付は指定できません。',
   job_not_found: '更新ジョブが見つかりません。保存済み情報を再検索してください。',
@@ -34,7 +36,7 @@ export function payload(input: Conditions, update = false) {
 }
 async function request(path: string, signal: AbortSignal, body?: object): Promise<unknown> {
   const timeout = new AbortController()
-  const timer = setTimeout(() => timeout.abort(), 10000)
+  const timer = setTimeout(() => timeout.abort(), 35000)
   try {
     const response = await fetch(`/api/availability/${path}`, {
       signal: AbortSignal.any([signal, timeout.signal]),
@@ -50,6 +52,23 @@ async function request(path: string, signal: AbortSignal, body?: object): Promis
     if (!response.ok) {
       const parsed = v.safeParse(ErrorSchema, data)
       const code = parsed.success ? parsed.output.error.code : ''
+      if (response.status === 429) {
+        const retry = v.safeParse(
+          v.pipe(
+            v.string(),
+            v.regex(/^\d{1,6}$/),
+            v.transform(Number),
+            v.minValue(1),
+            v.maxValue(86400),
+          ),
+          response.headers.get('Retry-After'),
+        )
+        throw new RequestError(
+          retry.success
+            ? `受付上限に達しています。${retry.output}秒ほど待ってから再試行してください。`
+            : '受付上限に達しています。時間をおいて再試行してください。',
+        )
+      }
       throw new RequestError(
         (Object.prototype.hasOwnProperty.call(messages, code) ? messages[code] : undefined) ??
           'APIを利用できません。時間をおいて再試行してください。',

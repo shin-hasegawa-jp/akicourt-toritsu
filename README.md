@@ -95,6 +95,12 @@ npm run build:ts
 npm test
 ```
 
+## APIの受付と再試行
+
+短時間枠はAPIインスタンスごとの固定60秒窓で、公園一覧60・検索60・ジョブ参照300・更新12リクエスト。上限時はDBへアクセスせず429とRetry-Afterを返す。再起動でリセットされ、複数インスタンスでは共有しない。公式取得の未処理数・日次上限はFirestore側で別途維持する。
+
+API全体の待機は30秒、Firestore処理の待機は10秒、画面は35秒。Tasks登録は従来どおり個別最大5秒・全体10秒。時間切れは503 request_timeoutとし、発行済みSDK操作の取消しは保証しない。更新を再送すると同じ対象週の有効ジョブを再利用する。429・通信失敗時は進捗の自動確認を止め、画面の案内に従って手動で再試行する。更新停止時に利用者へworker起動操作は求めない。
+
 ## API／workerの起動
 
 `npm start`はビルド後に`dist/server.js`を起動する。ローカルの`npm run dev`も同じ入口を監視起動する。公開APIは`/api/availability/*`、workerは`/tasks/acquire`だけを登録し、公開APIへworkerルートを載せない。Viteは`/api`を除去せずAPIへ転送する。
