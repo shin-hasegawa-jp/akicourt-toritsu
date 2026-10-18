@@ -36,11 +36,9 @@ docker compose -f compose.dev.yaml exec -T api node scripts/check-firestore-emul
 
 APIコンテナからは`firestore:8080`、ホストからは`127.0.0.1:17593`へ接続する。ホスト側ポートは`FIRESTORE_PORT`で変更できる。プロジェクトは`demo-akicourt-local`固定。エミュレータ再起動でデータは消える。公園一覧・検索・更新・ジョブ参照APIはFirestoreを使用する。起動後に下記CLIで初期化・公園/祝日投入を行うと、公園一覧と未取得の検索結果を確認できる。初期投入後に`resume --apply`を実行すると、画面の更新操作から取得・保存・再検索まで確認できる。
 
-既定の`LOCAL_ACQUISITION=fixture`では公式へ通信しない。保存済み週間JSONのセルを対象週へ日付調整し、ホーム・施設HTMLは合成する。全公園で種目ごとに同じ検証データを使うため、実際の空き状況ではない。画面上部にも表示する。workerの取得・セッション管理・保存処理と15分待機・全体上限は本番と共通。
+ローカルでも本番と同じ公式通信・取得・セッション管理・保存処理を使う。「空き情報を更新」を押すと公式サイトへ通信するため、本番や別のローカル環境と同時に取得しない。取得間隔・15分待機・全体上限も共通。保存応答は自動テスト内だけで使用する。
 
 配送処理はFirestoreの登録済みqueuedジョブを1件ずつworkerへHTTP送信する。新規更新のAPIは取得完了を待たず202を返す。配送失敗時は自動再試行せず配送プロセスを停止する。`logs --tail 100 delivery worker`で確認し、必要ならworker停止→`acquisition-reset`→待機期限後の`resume`→worker/delivery再起動で復旧する。終了・再起動により実行中ジョブが残る場合も同じリセットを使う。エミュレータを再起動して初期化し直す方法でも開発を再開できる。worker/配送のソース変更は各サービスを`restart`して再ビルドする（API/Webは開発用の変更監視あり）。
-
-公式実通信が必要な場合だけ、`LOCAL_ACQUISITION=live`を設定して同じComposeの`up -d --force-recreate`を実行する（並行環境・本番workerを停止し、取得先を確認してから使用）。切替前にworker/deliveryを停止し、エミュレータを再起動して検証セッション・結果を消し、初期化/参照データ投入/再開をやり直す。fixtureとliveのデータ・セッションを混在させない。今回の検証ではliveを実行しない。
 
 Firestoreの管理操作はAPIコンテナ内のコンパイル済みCLIを使う。書込みは既定dry-runで、`--apply`を付けた時だけ反映する。 `repair-outbox`は登録待ちのqueuedジョブを最大10件確認し、`--apply`で再登録する。本物のCloud Tasksへの登録は本番設定（`TASKS_LOCATION`・`TASKS_QUEUE`・`TASKS_CALLER_SA`・`WORKER_URL`）が必要で、ローカルではdry-runのみ。
 
@@ -110,9 +108,9 @@ API全体の待機は30秒、Firestore処理の待機は10秒、画面は35秒�
 
 ## API／workerの起動
 
-`npm start`はビルド後に`dist/server.js`を起動する。ローカルの`npm run dev`も同じ入口を監視起動する。公開APIは`/api/availability/*`、workerは`/tasks/acquire`だけを登録し、公開APIへworkerルートを載せない。起動処理でFirestore・配送・公式通信/保存応答を組み立て、APIへサービス、workerへ取得処理を渡す。ルートや業務処理は環境変数で切り替えない。Viteは`/api`を除去せずAPIへ転送する。
+`npm start`はビルド後に`dist/server.js`を起動する。ローカルの`npm run dev`も同じ入口を監視起動する。公開APIは`/api/availability/*`、workerは`/tasks/acquire`だけを登録し、公開APIへworkerルートを載せない。起動処理でFirestore・配送・公式通信を組み立て、APIへサービス、workerへ取得処理を渡す。ルートや業務処理は環境変数で切り替えない。Viteは`/api`を除去せずAPIへ転送する。
 
-本番は`NODE_ENV=production`と`APP_ROLE=api`または`worker`を必須とし、`PORT`（既定8080）で0.0.0.0待受する。ローカルはapiが既定、PORT=17591・API_HOST=127.0.0.1で起動する（DockerはAPI_HOST=0.0.0.0）。本番workerはCloud Run IAMを必須とし、公開サービスとして配置しない。タスクヘッダーだけでは認証しない。ローカルworker/配送はdemoプロジェクトとFirestoreエミュレータ・明示的な`LOCAL_ACQUISITION`を必須とする。本番ではローカル設定を拒否する。workerのHTTPポートはCompose内だけに公開する。
+本番は`NODE_ENV=production`と`APP_ROLE=api`または`worker`を必須とし、`PORT`（既定8080）で0.0.0.0待受する。ローカルはapiが既定、PORT=17591・API_HOST=127.0.0.1で起動する（DockerはAPI_HOST=0.0.0.0）。本番workerはCloud Run IAMを必須とし、公開サービスとして配置しない。タスクヘッダーだけでは認証しない。ローカルはdemoプロジェクトとFirestoreエミュレータを使用し、配送処理の接続先はCompose内のworkerを指定する。本番はFirestore・Cloud Tasks・IAMを使用する。workerのHTTPポートはCompose内だけに公開する。
 
 ## 本番用の配布設定
 

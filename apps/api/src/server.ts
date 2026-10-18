@@ -2,8 +2,6 @@ import { AvailabilityService } from './routes/availability'
 import { FirestoreAvailabilityService } from './availability-api/firestore-service'
 import { CloudTaskDispatcher } from './storage/firestore/task-dispatcher'
 import { localDispatcher } from './local/delivery'
-import { localSettings } from './local/settings'
-import { fixtureFetch } from './local/fixture-fetch'
 import Fastify from 'fastify'
 import * as v from 'valibot'
 import api from './app'
@@ -55,16 +53,13 @@ export function createRuntimeApp(dependencies: RuntimeDependencies) {
 
 // Composition root: choose transports once and own their lifecycle.
 export function buildRuntimeApp(role: 'api' | 'worker') {
-  const local = process.env.LOCAL_ACQUISITION !== undefined ? localSettings() : undefined
+  const local = process.env.NODE_ENV !== 'production'
   const projectId = process.env.GOOGLE_CLOUD_PROJECT ?? ''
   if (role === 'api' && !projectId) return createRuntimeApp({ role })
-  if (role === 'worker' && process.env.NODE_ENV !== 'production' && !local)
-    throw new Error('local-worker-not-configured')
-  const fetchImpl = local?.mode === 'fixture' && role === 'worker' ? fixtureFetch() : fetch
   const cloudTasks =
     role === 'api' && process.env.NODE_ENV === 'production'
       ? new CloudTaskDispatcher({
-          projectId: projectId ?? '',
+          projectId,
           location: process.env.TASKS_LOCATION ?? '',
           queue: process.env.TASKS_QUEUE ?? '',
           callerSA: process.env.TASKS_CALLER_SA ?? '',
@@ -72,7 +67,7 @@ export function buildRuntimeApp(role: 'api' | 'worker') {
         })
       : undefined
   const db = connectFirestore({
-    projectId: projectId ?? '',
+    projectId,
     databaseId: process.env.FIRESTORE_DATABASE_ID ?? '',
   })
   const close = async () => {
@@ -97,7 +92,7 @@ export function buildRuntimeApp(role: 'api' | 'worker') {
         worker: new AcquisitionWorker(
           new WorkerStore(db, projectId),
           new OfficialSessionRepository(db, projectId),
-          { fetchImpl },
+          { fetchImpl: fetch },
         ),
         close,
       })

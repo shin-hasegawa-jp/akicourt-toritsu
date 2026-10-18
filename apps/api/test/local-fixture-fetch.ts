@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { WeekResponse } from '../availability/response-schemas'
-import { DateString, ParkId, parseValue } from '../validation'
-import { offsetDate } from '../availability/parser'
+import { WeekResponse } from '../src/availability/response-schemas'
+import { DateString, ParkId, parseValue } from '../src/validation'
+import { offsetDate } from '../src/availability/parser'
 
 // Saved weekly cells with shifted dates; home/facility HTML is synthetic.
 // Never fall through to network access, even for an unsupported request.

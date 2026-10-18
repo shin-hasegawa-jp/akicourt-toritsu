@@ -3,7 +3,7 @@ import { Firestore } from '@google-cloud/firestore'
 import { Id, parseValue } from '../validation'
 import { DispatchSchema } from '../storage/firestore/schemas'
 import { connectFirestore } from '../storage/firestore/database'
-import { localSettings } from './settings'
+import { localDeliverySettings } from './settings'
 import { Dispatcher } from '../storage/firestore/task-dispatcher'
 
 // Registration is the existing submitted marker. This emulator-only delivery
@@ -38,9 +38,7 @@ export async function deliverNext(db: Firestore, workerUrl: string, signal: Abor
 }
 
 async function start() {
-  const settings = localSettings()
-  const workerUrl = settings.workerUrl
-  if (!workerUrl) throw new Error('local-worker-url-required')
+  const workerUrl = localDeliverySettings()
   const db = connectFirestore({
     projectId: process.env.GOOGLE_CLOUD_PROJECT ?? '',
     databaseId: process.env.FIRESTORE_DATABASE_ID ?? '',

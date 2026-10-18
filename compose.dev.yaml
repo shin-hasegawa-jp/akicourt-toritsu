@@ -6,7 +6,6 @@ services:
       context: ./apps/api
       dockerfile: Dockerfile.dev
     environment:
-      LOCAL_ACQUISITION: ${LOCAL_ACQUISITION:-fixture}
       GOOGLE_CLOUD_PROJECT: demo-akicourt-local
       FIRESTORE_DATABASE_ID: (default)
       FIRESTORE_EMULATOR_HOST: firestore:8080
@@ -33,7 +32,6 @@ services:
       context: ./apps/web
       dockerfile: Dockerfile.dev
     environment:
-      VITE_LOCAL_ACQUISITION: ${LOCAL_ACQUISITION:-fixture}
       WEB_HOST: 0.0.0.0
       WEB_PORT: 5173
       API_PROXY_TARGET: http://api:3000
@@ -80,7 +78,6 @@ services:
       APP_ROLE: worker
       API_HOST: 0.0.0.0
       PORT: 3000
-      LOCAL_ACQUISITION: ${LOCAL_ACQUISITION:-fixture}
       GOOGLE_CLOUD_PROJECT: demo-akicourt-local
       FIRESTORE_DATABASE_ID: (default)
       FIRESTORE_EMULATOR_HOST: firestore:8080
@@ -106,7 +103,6 @@ services:
     init: true
     command: ["sh", "-c", "npm ci --ignore-scripts --no-audit --no-fund && npm run build:ts && exec node dist/local/delivery.js"]
     environment:
-      LOCAL_ACQUISITION: ${LOCAL_ACQUISITION:-fixture}
       LOCAL_WORKER_URL: http://worker:3000
       GOOGLE_CLOUD_PROJECT: demo-akicourt-local
       FIRESTORE_DATABASE_ID: (default)

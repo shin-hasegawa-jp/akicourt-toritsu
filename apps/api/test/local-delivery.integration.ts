@@ -10,7 +10,7 @@ import { WorkerStore } from '../src/storage/firestore/worker-store'
 import { OfficialSessionRepository } from '../src/storage/firestore/official-session'
 import { AcquisitionWorker } from '../src/worker/runner'
 import { createWorkerApp } from '../src/worker/app'
-import { fixtureFetch } from '../src/local/fixture-fetch'
+import { fixtureFetch } from './local-fixture-fetch'
 import { deliverNext, localDispatcher } from '../src/local/delivery'
 
 test(
