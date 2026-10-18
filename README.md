@@ -81,7 +81,7 @@ WEB_PORT=17590 API_PROXY_TARGET=http://127.0.0.1:17591 npm run dev
 
 ## 確認
 
-画面は検索・更新APIへ接続する。疎通確認は`GET /health`を使用する。`/api/*`の転送はViteの開発プロキシを使用。
+画面は検索・更新APIへ接続する。疎通確認は`GET /health`または`GET /api/health`を使用する。`/api/*`の転送はViteの開発プロキシを使用。
 
 ```sh
 # apps/web
@@ -94,6 +94,12 @@ npm run type-check
 npm run build:ts
 npm test
 ```
+
+## API／workerの起動
+
+`npm start`はビルド後に`dist/server.js`を起動する。ローカルの`npm run dev`も同じ入口を監視起動する。公開APIは`/api/availability/*`、workerは`/tasks/acquire`だけを登録し、公開APIへworkerルートを載せない。Viteは`/api`を除去せずAPIへ転送する。
+
+本番は`NODE_ENV=production`と`APP_ROLE=api`または`worker`を必須とし、`PORT`（既定8080）で0.0.0.0待受する。ローカルはapiが既定、PORT=17591・API_HOST=127.0.0.1で起動する（DockerはAPI_HOST=0.0.0.0）。本番workerはCloud Run IAMを必須とし、公開サービスとして配置しない。タスクヘッダーだけでは認証しない。ローカルworkerの保存応答/配送配線はFS-3cで追加するため、それまではworker起動を拒否し公式通信を始めない。
 
 ## CI・依存更新
 

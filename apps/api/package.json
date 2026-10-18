@@ -9,11 +9,11 @@
   "scripts": {
     "test": "npm run build:ts && tsc -p test/tsconfig.json && c8 node --test -r ts-node/register \"test/**/*.ts\"",
     "clean": "node -e \"const fs=require('node:fs'); if(fs.existsSync('dist')) for(const entry of fs.readdirSync('dist')) fs.rmSync(require('node:path').join('dist',entry), {recursive:true,force:true})\"",
-    "start": "npm run build:ts && fastify start -l info dist/app.js",
+    "start": "npm run build:ts && node dist/server.js",
     "build:ts": "npm run clean && tsc",
     "watch:ts": "tsc -w",
     "dev": "npm run build:ts && concurrently -k -p \"[{name}]\" -n \"TypeScript,App\" -c \"yellow.bold,cyan.bold\" \"npm:watch:ts\" \"npm:dev:start\"",
-    "dev:start": "fastify start --ignore-watch=.ts$ -w -l info -P --address ${API_HOST:-127.0.0.1} --port ${PORT:-17591} dist/app.js",
+    "dev:start": "node --watch dist/server.js",
     "type-check": "tsc --noEmit && tsc -p test/tsconfig.json",
     "storage": "node -r ts-node/register src/storage/cli.ts",
     "test:db": "node -e \"if (!process.env.DATABASE_URL) { console.error('DATABASE_URL is required'); process.exit(1) }\" && node --test -r ts-node/register test/storage.integration.ts test/availability-api.test.ts test/holidays.test.ts test/parks.test.ts test/reference-data.test.ts",
