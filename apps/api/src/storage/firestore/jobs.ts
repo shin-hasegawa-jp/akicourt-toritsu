@@ -175,20 +175,6 @@ export class JobRepository {
     )
   }
 
-  async pending() {
-    const documents = await this.db
-      .collection('jobs')
-      .where('dispatchState', '==', 'pending')
-      .where('state', '==', 'queued')
-      .limit(10)
-      .get()
-    return documents.docs.map((d) => {
-      const generation: unknown = d.get('generation')
-      if (!v.is(NonNegativeInteger, generation)) throw invalid()
-      return { jobId: d.id, generation }
-    })
-  }
-
   async dispatchable(job: DispatchJob) {
     if (!validId(job.jobId) || !v.is(NonNegativeInteger, job.generation)) throw invalid()
     const data = parseValue(

@@ -41,7 +41,7 @@ test(
         first = result[0][0]
         assert.equal((await queue.get()).get('pendingJobCount'), 1)
         assert.equal((await db.doc('usage/2026-10-18').get()).get('newJobCount'), 1)
-        assert.equal((await jobs.pending()).length, 1)
+        assert.equal((await db.doc(`jobs/${first.jobId}`).get()).get('dispatchState'), 'pending')
       })
       await t.test(
         'failure retries the same job; response loss and early completion never regress state',

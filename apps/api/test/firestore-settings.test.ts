@@ -34,7 +34,6 @@ test('Firestore settings refuse accidental live access and production emulator u
 test('Firestore CLI requires explicit destination and defaults to dry-run', () => {
   const args = ['initialize', '--project', local.projectId, '--database', '(default)']
   assert.equal(parseFirestoreArguments(args).apply, false)
-  assert.equal(parseFirestoreArguments(['repair-outbox', ...args.slice(1)]).apply, false)
   assert.equal(parseFirestoreArguments([...args, '--apply']).apply, true)
   for (const command of ['pause', 'resume', 'acquisition-reset'])
     assert.equal(parseFirestoreArguments([command, ...args.slice(1)]).apply, false)
@@ -58,6 +57,7 @@ test('Firestore CLI requires explicit destination and defaults to dry-run', () =
       'session-clear',
       'repair-jobs',
       'repair-counters',
+      'repair-outbox',
     ].map((command) => [command, ...args.slice(1)]),
     ['resume', ...args.slice(1), '--confirm-worker-stopped'],
     ['acquisition-reset', ...args.slice(1), '--confirm-worker-stopped', '--confirm-worker-stopped'],
