@@ -82,6 +82,20 @@ jobs:
         env:
           DATABASE_URL: postgresql://akicourt:ci-password@127.0.0.1:5432/akicourt_test
 
+  production:
+    name: Production image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: Build release image
+        run: docker build --platform linux/amd64 -t akicourt-production:check -f apps/api/Dockerfile apps/api
+      - name: Check API and worker without external access
+        run: node apps/api/scripts/check-production-image.cjs
+
   firestore:
     name: Firestore
     runs-on: ubuntu-latest
