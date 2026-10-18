@@ -53,8 +53,7 @@ export class FirestoreSearch {
     if (!v.is(PositiveInteger, maxReadBytes) || maxReadBytes > limits.searchBytes)
       throw new Error('invalid-read-budget')
   }
-  async search(input: Input, now = new Date()) {
-    const query = resolveInput(input)
+  async search(input: Input, now = new Date(), query = resolveInput(input)) {
     const minute = (clock: string) => Number(clock.slice(0, 2)) * 60 + Number(clock.slice(3))
     const started = performance.now()
     let statistics = { documentReads: 0, wireBytes: 0 }

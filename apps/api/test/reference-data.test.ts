@@ -3,9 +3,7 @@ import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import Fastify from 'fastify'
 import { Pool } from 'pg'
-import referenceData from '../src/plugins/reference-data'
 import { prepareStorage } from '../src/storage/sync-reference-data'
 import parks from '../src/storage/park-options'
 import { Store } from '../src/storage/store'
@@ -27,7 +25,7 @@ test('deployment park catalog matches the reviewed official options', () => {
 })
 
 test(
-  'API startup synchronizes masters; repetition, history and atomic rollback',
+  'legacy SQL preparation: repetition, history and atomic rollback',
   { skip: !process.env.DATABASE_URL },
   async () => {
     const previous = process.env.DATABASE_URL!
@@ -37,15 +35,7 @@ test(
     const url = new URL(previous)
     url.searchParams.set('options', `-c search_path=${schema}`)
     const pool = new Pool({ connectionString: url.toString() })
-    const boot = async () => {
-      const app = Fastify()
-      try {
-        await app.register(referenceData)
-        await app.ready()
-      } finally {
-        await app.close()
-      }
-    }
+    const boot = () => prepareStorage(pool)
     try {
       process.env.DATABASE_URL = url.toString()
       await boot()
@@ -84,7 +74,7 @@ test(
       await pool.query(`CREATE FUNCTION reject_sync() RETURNS trigger LANGUAGE plpgsql AS $$
         BEGIN RAISE EXCEPTION 'simulated failure'; END $$;
         CREATE TRIGGER reject_sync BEFORE INSERT ON holidays FOR EACH ROW EXECUTE FUNCTION reject_sync()`)
-      await assert.rejects(boot(), /reference-data-sync-failed/)
+      await assert.rejects(boot())
       assert.equal(
         (await pool.query("SELECT name FROM park_surfaces WHERE park_id='1280'")).rows[0].name,
         'before failure',

@@ -26,19 +26,6 @@ docker compose -f compose.dev.yaml down
 
 カスタム設定で起動した場合、停止・ログ確認にも同じ設定を使う。公開先は127.0.0.1限定。起動時に`npm ci`を実行し、依存物はホストと分離する。
 
-DBを使う場合は`.env`に生成した16進数の`POSTGRES_PASSWORD`を設定し、`-f compose.db.yaml`を追加する。DBはホスト非公開。ホストNodeから接続する場合だけ`-f compose.db-host.yaml`も追加し、`DB_PORT`（既定17592）を指定する。DB付き環境の停止にも同じ`-f`指定を使う。
-
-DB付きAPIは起動時にスキーマ更新と祝日・公園マスターの同期を行う。同期が失敗した場合は起動しない。以下で更新要求・独立ワーカー起動を行う。更新は既定で日本時間の本日から7日間。ワーカーの起動後は公式へ通信するため、意図した時だけ起動する。
-
-```sh
-docker compose -f compose.dev.yaml -f compose.db.yaml exec -T api npm run storage -- enqueue 1280:grass
-docker compose -f compose.dev.yaml -f compose.db.yaml --profile acquisition up -d --build worker
-# 停止（API・DBは維持）
-docker compose -f compose.dev.yaml -f compose.db.yaml --profile acquisition stop worker
-```
-
-公式の非成功HTTP応答は共通の取得失敗として扱い、即時再試行しない。同一週の再要求は成功・失敗とも15分間再利用する。`npm run test:db`は接続先DBの隔離スキーマで検証する（`DATABASE_URL`必須）。
-
 ## Firestoreのローカル検証
 
 Java・Firebase CLIをDocker内で動かす。ホストへのJava導入やGCPログインは不要。
@@ -48,7 +35,7 @@ docker compose -f compose.dev.yaml -f compose.firestore.yaml up -d --build --wai
 docker compose -f compose.dev.yaml -f compose.firestore.yaml exec -T api node scripts/check-firestore-emulator.cjs
 ```
 
-APIコンテナからは`firestore:8080`、ホストからは`127.0.0.1:17593`へ接続する。ホスト側ポートは`FIRESTORE_PORT`で変更できる。プロジェクトは`demo-akicourt-local`固定。エミュレータ再起動でデータは消える。現時点の検索・更新APIはPostgreSQL版のため、この構成ではSDK接続と公園/祝日・制御状態の初期投入を確認できる。通常のWeb/API起動ではエミュレータは不要。
+APIコンテナからは`firestore:8080`、ホストからは`127.0.0.1:17593`へ接続する。ホスト側ポートは`FIRESTORE_PORT`で変更できる。プロジェクトは`demo-akicourt-local`固定。エミュレータ再起動でデータは消える。公園一覧・検索・更新・ジョブ参照APIはFirestoreを使用する。起動後に下記CLIで初期化・公園/祝日投入を行うと、公園一覧と未取得の検索結果を確認できる。DBなし起動はhealthのみ確認でき、保存情報のAPIは503を返す。ローカルのタスク配送・worker起動は後続対応のため、通常のローカル更新APIは503。偽dispatcherを用いた更新から保存・検索までの接続は統合テストで確認する。
 
 Firestoreの管理操作はAPIコンテナ内のコンパイル済みCLIを使う。書込みは既定dry-runで、`--apply`を付けた時だけ反映する。 `repair-outbox`は登録待ちのqueuedジョブを最大10件確認し、`--apply`で再登録する。本物のCloud Tasksへの登録は本番設定（`TASKS_LOCATION`・`TASKS_QUEUE`・`TASKS_CALLER_SA`・`WORKER_URL`）が必要で、ローカルではdry-runのみ。
 
@@ -120,18 +107,14 @@ Dependabotは毎週月曜9:00（日本時間）にnpm・GitHub Actions・Dockerf
 curl -sS http://127.0.0.1:17590/api/availability/search -H 'Content-Type: application/json' -d '{"targets":[{"parkId":"1280","surface":"grass"}]}'
 ```
 
-日付省略時は日本時間の本日から7日間。検索は保存済み情報のみを返す。`POST /api/availability/updates`へ同じ対象・期間を送り、返された`jobId`を`GET /api/availability/updates/:jobId`で確認する。更新には稼働中のワーカーが必要（停止中は503）。祝日条件に必要な年の登録が未完了なら503を返す。[祝日データの登録・更新手順](docs/祝日データ.md)を参照（2026・2027年を同梱）。
+日付省略時は日本時間の本日から7日間。検索は保存済み情報のみを返す。`POST /api/availability/updates`へ同じ対象・期間を送り、返された`jobId`を`GET /api/availability/updates/:jobId`で確認する。更新にはCloud Tasksの本番設定とDBの更新許可が必要（停止中は503）。workerがscale-to-zeroでも受付可能。祝日条件に必要な年の登録が未完了なら503を返す。[祝日データの登録・更新手順](docs/祝日データ.md)を参照（2026・2027年を同梱）。
 
-公式への取得は更新APIまたは`storage enqueue`で登録し、ワーカーで実行する。DBの重複・停止制御を通らない旧検証CLIは削除済み。取得処理の検証は自動テストを利用する。
+公式への取得は更新APIで登録し、タスク配送先のworkerで実行する。同じ対象週の再送は既存ジョブを再利用し、登録待ちの場合だけタスク登録を再試行する。公開APIは公式へ直接通信しない。旧PostgreSQLのコード・CLI・Compose・CIは段階的な除去待ちで、公開APIからは使用しない。
 
 期間以外の検索条件は変更時にブラウザ内へ自動保存する。画面を開くと期間は常に日本時間の本日から7日間（終了日は6日後）になる。公園は名前検索付きの選択画面で最大5対象を指定する。時間帯は開始時刻を複数選択でき、選択なしは時間指定なし。開始時刻の絞り込みは、検索APIが返す検証済みの保存枠に対して画面側で行う（取得範囲は変更しない）。終了時刻は公園・季節により異なるため、取得値をそのまま表示する。公式サイトへは画面上部の共通リンクから別タブで移動する。検索条件の引き継ぎや枠のコピーは行わず、予約操作は公式側で行う。
 
 機能開発はdevelopからfeatureブランチを作り、develop向けPRでレビューする。定期取得・本番公開は未実装。公式の「空き」「予約あり」「受付期間外」「保守日」に対応し、未知の状態は取得失敗とする。選択肢の照合と全対象の実取得確認は別であり、全公園・全状態と、公式の検索可能日の最遠上限は未確認。
 
-## デプロイ時のマスターデータ同期
+## マスターデータの投入
 
-`DATABASE_URL`を設定したAPIは、リクエスト受付前にマイグレーションとコード内の祝日・公園データのDB同期を行う。APIの再起動時にも実行する。事前に明示実行する場合は`apps/api`で`npm run storage -- prepare`を使う。実行時には`migrations`ディレクトリをAPIとともに配置する。
-
-祝日の管理元は`apps/api/src/storage/holiday-calendar.ts`、公園は`apps/api/src/storage/park-options.ts`。祝日は同梱年・日付・名称・完了記録をコードに合わせて置き換える（コードから外した年も削除する）。公園は追加・名称変更・再有効化を反映し、コードから外した公園は無効化して取得履歴を保持する。画面の選択肢は`GET /api/availability/parks`から取得し、APIのカタログ順に表示する。公園の追加・名称変更はAPIのカタログだけを更新する。過去のSQLマイグレーションは編集しない。
-
-両マスターの更新は同一トランザクションで行い、失敗時は両方を元に戻す。同時実行は直列化し、公式への外部通信は行わない。異なるコード版の同時起動では後から同期した版が反映されるため、デプロイ時は古い版の再起動を避ける。
+APIの起動時にDBの同期・初期化は行わない。Firestore管理CLIで初回の`initialize`と`seed-reference-data`を明示実行する。公園・祝日の変更時も取得停止・所有権解放後にseedする。祝日の管理元は`apps/api/src/storage/holiday-calendar.ts`、公園は`apps/api/src/storage/park-options.ts`。画面の一覧はFirestoreの投入済みカタログから取得する。
