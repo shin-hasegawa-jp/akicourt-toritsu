@@ -188,6 +188,62 @@ describe('API search and asynchronous updates', () => {
     expect(wrapper.text()).toContain('取得処理が完了')
     wrapper.unmount()
   })
+  it('stops polling on 429, preserves results and resumes only on manual confirmation', async () => {
+    vi.useFakeTimers()
+    const limited = new Response(
+      JSON.stringify({ error: { code: 'rate_limited', message: 'private detail' } }),
+      { status: 429, headers: { 'Retry-After': '30' } },
+    )
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(response(result()))
+      .mockResolvedValueOnce(response({ jobs: [job()], pollAfterSeconds: 3 }, 202))
+      .mockResolvedValueOnce(limited)
+      .mockResolvedValueOnce(response(job('succeeded')))
+      .mockResolvedValueOnce(response(result('complete')))
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(App)
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    await wrapper.get('.update-controls button').trigger('click')
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(3000)
+    await flushPromises()
+    expect(wrapper.text()).toContain('30秒ほど待って')
+    expect(wrapper.text()).not.toContain('private detail')
+    expect(wrapper.text()).toContain('「空きなし」という意味ではありません')
+    await vi.advanceTimersByTimeAsync(60000)
+    expect(fetch).toHaveBeenCalledTimes(3)
+    const retry = wrapper.findAll('button').find((button) => button.text() === '進捗を再確認')!
+    await retry.trigger('click')
+    await vi.advanceTimersByTimeAsync(3000)
+    await flushPromises()
+    expect(wrapper.text()).toContain('取得処理が完了')
+    wrapper.unmount()
+  })
+  it('shows paused admission without asking users to start the worker and allows manual retry', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(response(result()))
+      .mockResolvedValueOnce(
+        response({ error: { code: 'worker_unavailable', message: 'private detail' } }, 503),
+      )
+      .mockResolvedValueOnce(response({ jobs: [job('succeeded')], pollAfterSeconds: 3 }))
+      .mockResolvedValueOnce(response(result('complete')))
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(App)
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    await wrapper.get('.update-controls button').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('更新受付は停止しています')
+    expect(wrapper.text()).not.toContain('起動状態を確認')
+    expect(wrapper.text()).not.toContain('private detail')
+    await wrapper.get('.update-controls button').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('取得処理が完了')
+    wrapper.unmount()
+  })
   it('times out a search and aborts in-flight polling on unmount', async () => {
     vi.useFakeTimers()
     const fetch = vi
@@ -201,7 +257,7 @@ describe('API search and asynchronous updates', () => {
     vi.stubGlobal('fetch', fetch)
     const wrapper = mount(App)
     await wrapper.get('form').trigger('submit')
-    await vi.advanceTimersByTimeAsync(10000)
+    await vi.advanceTimersByTimeAsync(35000)
     await flushPromises()
     expect(wrapper.text()).toContain('応答に時間がかかっています')
     await wrapper.get('form').trigger('submit')

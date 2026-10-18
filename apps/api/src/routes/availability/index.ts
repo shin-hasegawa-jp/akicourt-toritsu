@@ -1,6 +1,12 @@
+import {
+  RequestLimits,
+  RequestKind,
+  requestTimeoutMs,
+  withTimeout,
+} from '../../availability-api/controls'
 import * as v from 'valibot'
 import { parseValue } from '../../validation'
-import { FastifyPluginAsync } from 'fastify'
+import { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify'
 import { connectFirestore } from '../../storage/firestore/database'
 import { AdmissionError } from '../../storage/firestore/jobs'
 import { CloudTaskDispatcher } from '../../storage/firestore/task-dispatcher'
@@ -17,10 +23,9 @@ import {
 import { errorSchema, jobSchema, searchSchema, updateSchema } from '../../availability-api/schemas'
 
 // Inject dependencies for isolated tests. Normal startup owns and closes its SDK clients.
-const routes: FastifyPluginAsync<{ service?: FirestoreAvailabilityService }> = async (
-  app,
-  opts,
-) => {
+const routes: FastifyPluginAsync<{
+  service?: Pick<FirestoreAvailabilityService, 'parks' | 'search' | 'updates' | 'job'>
+}> = async (app, opts) => {
   const projectId = process.env.GOOGLE_CLOUD_PROJECT
   const db =
     !opts.service && projectId
@@ -59,8 +64,24 @@ const routes: FastifyPluginAsync<{ service?: FirestoreAvailabilityService }> = a
     if (error instanceof AdmissionError) reply.header('Retry-After', String(error.retryAfter))
     reply.code(safe.status).send({ error: { code: safe.code, message: safe.message } })
   })
+  const limits = new RequestLimits()
+  const limit = (kind: RequestKind) => async (_request: FastifyRequest, reply: FastifyReply) => {
+    const retry = limits.retryAfter(kind)
+    if (retry)
+      return reply
+        .code(429)
+        .header('Retry-After', String(retry))
+        .send({
+          error: {
+            code: 'rate_limited',
+            message: '受付上限に達しています。時間をおいて再試行してください。',
+          },
+        })
+  }
   const errors = { 400: errorSchema, 404: errorSchema, 429: errorSchema, 503: errorSchema }
-  app.get('/parks', async () => service().parks())
+  app.get('/parks', { onRequest: limit('parks') }, async () =>
+    withTimeout(() => service().parks(), requestTimeoutMs),
+  )
 
   // Validate before AJV can coerce values or strip unknown fields.
   const validateBody = (schema: v.GenericSchema) => async (request: { body: unknown }) => {
@@ -73,17 +94,19 @@ const routes: FastifyPluginAsync<{ service?: FirestoreAvailabilityService }> = a
   app.post<{ Body: Input }>(
     '/search',
     {
+      onRequest: limit('search'),
       preValidation: validateBody(InputSchema),
       schema: { body: bodySchema(searchProperties), response: { 200: searchSchema, ...errors } },
     },
     async (request) => {
       const query = resolveInput(request.body)
-      return service().search(request.body, query)
+      return withTimeout(() => service().search(request.body, query), requestTimeoutMs)
     },
   )
   app.post<{ Body: Input }>(
     '/updates',
     {
+      onRequest: limit('updates'),
       preValidation: validateBody(v.pick(InputSchema, ['targets', 'dateFrom', 'dateTo'])),
       schema: {
         body: bodySchema(commonProperties),
@@ -92,13 +115,17 @@ const routes: FastifyPluginAsync<{ service?: FirestoreAvailabilityService }> = a
     },
     async (request, reply) => {
       const query = resolveInput(request.body, true)
-      const result = await service().updates(request.body, query)
+      const result = await withTimeout(
+        () => service().updates(request.body, query),
+        requestTimeoutMs,
+      )
       return reply.code(result.status).send(result.body)
     },
   )
   app.get<{ Params: { jobId: string } }>(
     '/updates/:jobId',
     {
+      onRequest: limit('job'),
       schema: {
         params: {
           type: 'object',
@@ -108,7 +135,7 @@ const routes: FastifyPluginAsync<{ service?: FirestoreAvailabilityService }> = a
         response: { 200: jobSchema, ...errors },
       },
     },
-    async (request) => service().job(request.params.jobId),
+    async (request) => withTimeout(() => service().job(request.params.jobId), requestTimeoutMs),
   )
 }
 export default routes

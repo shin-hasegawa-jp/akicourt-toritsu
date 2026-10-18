@@ -9,7 +9,7 @@ import { Input, resolveInput } from '../src/availability-api/input'
 import { firestoreSettings } from '../src/storage/firestore/database'
 import { ReferenceRepository } from '../src/storage/firestore/reference-data'
 import { WorkerStore } from '../src/storage/firestore/worker-store'
-import { DispatchJob } from '../src/storage/firestore/jobs'
+import { DispatchJob, JobRepository } from '../src/storage/firestore/jobs'
 import parks from '../src/storage/park-options'
 import { japanToday } from '../src/storage/scopes'
 import { offsetDate } from '../src/availability/parser'
@@ -36,7 +36,7 @@ test(
         if (rejectDispatch) throw new Error('private-sdk-error')
       },
     }
-    const app = Fastify()
+    let app = Fastify()
     const service = new FirestoreAvailabilityService(db, projectId, dispatcher, () => now)
     const store = new WorkerStore(db, projectId, () => now)
     const references = new ReferenceRepository(db)
@@ -56,6 +56,9 @@ test(
       await control.update({ updatesEnabled: true })
       rejectDispatch = false
       sent.length = 0
+      await app.close()
+      app = Fastify()
+      await app.register(routes, { service, prefix: '/api/availability' })
     }
     const originalFetch = globalThis.fetch
     globalThis.fetch = async () => {
@@ -140,6 +143,51 @@ test(
           const corrupt = await app.inject(`/api/availability/updates/${job.jobId}`)
           assert.equal(corrupt.statusCode, 503)
           assert.doesNotMatch(corrupt.body, /private-cookie|requestCount/)
+        },
+      )
+      await t.test(
+        'late enqueue response is not dispatched after timeout; manual resend reuses committed job',
+        async (child) => {
+          await fresh()
+          const original = JobRepository.prototype.enqueue
+          const saved = Promise.withResolvers<void>()
+          const release = Promise.withResolvers<void>()
+          let accepted: Awaited<ReturnType<typeof original>> = []
+          child.mock.method(
+            JobRepository.prototype,
+            'enqueue',
+            async function (this: JobRepository, targets: Parameters<typeof original>[0]) {
+              accepted = await original.call(this, targets)
+              saved.resolve()
+              await release.promise
+              return accepted
+            },
+          )
+          child.mock.timers.enable({ apis: ['setTimeout'] })
+          try {
+            const pending = Promise.resolve(post('updates'))
+            await saved.promise
+            child.mock.timers.tick(10001)
+            const timedOut = await pending
+            assert.equal(timedOut.statusCode, 503, timedOut.body)
+            assert.equal(timedOut.json().error.code, 'request_timeout')
+            assert.equal(sent.length, 0)
+            release.resolve()
+            await Promise.resolve()
+            child.mock.timers.reset()
+            child.mock.restoreAll()
+            const retry = await post('updates')
+            assert.equal(retry.statusCode, 202, retry.body)
+            assert.equal(retry.json().jobs[0].jobId, accepted[0].jobId)
+            assert.equal(retry.json().jobs[0].reused, true)
+            assert.equal(sent.length, 1)
+            assert.equal((await db.collection('jobs').get()).size, 1)
+            assert.equal((await db.doc(`usage/${japanToday(now)}`).get()).get('newJobCount'), 1)
+          } finally {
+            release.resolve()
+            child.mock.timers.reset()
+            child.mock.restoreAll()
+          }
         },
       )
       await t.test(

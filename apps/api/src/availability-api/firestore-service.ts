@@ -1,3 +1,4 @@
+import { withTimeout } from './controls'
 import * as v from 'valibot'
 import { Firestore } from '@google-cloud/firestore'
 import { Id, NonNegativeInteger, TargetSchema, parseValue } from '../validation'
@@ -33,7 +34,7 @@ export class FirestoreAvailabilityService {
   }
 
   async parks() {
-    const { parks } = await new ReferenceRepository(this.db).read()
+    const { parks } = await withTimeout(() => new ReferenceRepository(this.db).read())
     const first = parks[0]
     if (!first) throw unavailable()
     return {
@@ -51,10 +52,8 @@ export class FirestoreAvailabilityService {
   }
 
   async search(input: Input, query = resolveInput(input)) {
-    const result = await new FirestoreSearch(this.db, this.projectId).search(
-      input,
-      this.now(),
-      query,
+    const result = await withTimeout(() =>
+      new FirestoreSearch(this.db, this.projectId).search(input, this.now(), query),
     )
     return {
       ...result,
@@ -74,7 +73,7 @@ export class FirestoreAvailabilityService {
   async updates(input: Input, query = resolveInput(input, true)) {
     if (!this.dispatcher)
       throw new ApiError(503, 'worker_unavailable', '更新受付は停止しています。')
-    const accepted = await this.jobs.enqueue(query.targets)
+    const accepted = await withTimeout(() => this.jobs.enqueue(query.targets))
     // Resubmission retries pending registration using the same job and task name.
     // A failed dispatch keeps the durable job; no background retry is scheduled.
     await dispatchPending(
@@ -93,7 +92,7 @@ export class FirestoreAvailabilityService {
 
   async job(id: string) {
     if (!v.is(Id, id)) throw new ApiError(400, 'invalid_request', '入力内容を確認してください。')
-    const doc = await this.db.doc(`jobs/${id}`).get()
+    const doc = await withTimeout(() => this.db.doc(`jobs/${id}`).get())
     if (!doc.exists) throw new ApiError(404, 'job_not_found', '更新ジョブが見つかりません。')
     const job = parseValue(Job, doc.data(), unavailable)
     if (job.scopeId !== scopeId(job.target)) throw unavailable()
