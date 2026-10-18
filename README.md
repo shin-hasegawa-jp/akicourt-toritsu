@@ -4,7 +4,7 @@
 
 ## Dockerで起動
 
-リポジトリのルートで実行する。DockerとComposeが必要。
+リポジトリのルートで実行する。DockerとComposeが必要。Web/API・Firestoreエミュレータ・worker・ローカル配送をまとめて起動する。
 
 ```sh
 docker compose -f compose.dev.yaml up -d --build --wait --wait-timeout 300
@@ -12,10 +12,10 @@ docker compose -f compose.dev.yaml up -d --build --wait --wait-timeout 300
 
 Web：http://127.0.0.1:17590 ／ API：http://127.0.0.1:17591/health
 
-`.env`は不要。設定を保存する場合は`.env.example`を`.env`へコピーする。並行開発ではプロジェクト名と両ポートを変える。
+`.env`は不要。設定を保存する場合は`.env.example`を`.env`へコピーする。並行開発ではプロジェクト名とWeb/API/Firestoreのポートを変える。
 
 ```sh
-COMPOSE_PROJECT_NAME=akicourt-toritsu-second WEB_PORT=17690 API_PORT=17691 \
+COMPOSE_PROJECT_NAME=akicourt-toritsu-second WEB_PORT=17690 API_PORT=17691 FIRESTORE_PORT=17693 \
   docker compose -f compose.dev.yaml up -d --build --wait --wait-timeout 300
 ```
 
@@ -28,28 +28,33 @@ docker compose -f compose.dev.yaml down
 
 ## Firestoreのローカル検証
 
-Java・Firebase CLIをDocker内で動かす。ホストへのJava導入やGCPログインは不要。
+上記の起動でJava・Firebase CLIもDocker内で動く。ホストへのJava導入やGCPログインは不要。
 
 ```sh
-docker compose -f compose.dev.yaml -f compose.firestore.yaml up -d --build --wait --wait-timeout 300
-docker compose -f compose.dev.yaml -f compose.firestore.yaml exec -T api node scripts/check-firestore-emulator.cjs
+docker compose -f compose.dev.yaml exec -T api node scripts/check-firestore-emulator.cjs
 ```
 
-APIコンテナからは`firestore:8080`、ホストからは`127.0.0.1:17593`へ接続する。ホスト側ポートは`FIRESTORE_PORT`で変更できる。プロジェクトは`demo-akicourt-local`固定。エミュレータ再起動でデータは消える。公園一覧・検索・更新・ジョブ参照APIはFirestoreを使用する。起動後に下記CLIで初期化・公園/祝日投入を行うと、公園一覧と未取得の検索結果を確認できる。DBなし起動はhealthのみ確認でき、保存情報のAPIは503を返す。ローカルのタスク配送・worker起動は後続対応のため、通常のローカル更新APIは503。偽dispatcherを用いた更新から保存・検索までの接続は統合テストで確認する。
+APIコンテナからは`firestore:8080`、ホストからは`127.0.0.1:17593`へ接続する。ホスト側ポートは`FIRESTORE_PORT`で変更できる。プロジェクトは`demo-akicourt-local`固定。エミュレータ再起動でデータは消える。公園一覧・検索・更新・ジョブ参照APIはFirestoreを使用する。起動後に下記CLIで初期化・公園/祝日投入を行うと、公園一覧と未取得の検索結果を確認できる。初期投入後に`resume --apply`を実行すると、画面の更新操作から取得・保存・再検索まで確認できる。
+
+ローカルでも本番と同じ公式通信・取得・セッション管理・保存処理を使う。「空き情報を更新」を押すと公式サイトへ通信するため、本番や別のローカル環境と同時に取得しない。取得間隔・15分待機・全体上限も共通。保存応答は自動テスト内だけで使用する。
+
+配送処理はFirestoreの登録済みqueuedジョブを1件ずつworkerへHTTP送信する。新規更新のAPIは取得完了を待たず202を返す。配送失敗時は自動再試行せず配送プロセスを停止する。`logs --tail 100 delivery worker`で確認し、必要ならworker停止→`acquisition-reset`→待機期限後の`resume`→worker/delivery再起動で復旧する。終了・再起動により実行中ジョブが残る場合も同じリセットを使う。エミュレータを再起動して初期化し直す方法でも開発を再開できる。worker/配送のソース変更は各サービスを`restart`して再ビルドする（API/Webは開発用の変更監視あり）。
 
 Firestoreの管理操作はAPIコンテナ内のコンパイル済みCLIを使う。書込みは既定dry-runで、`--apply`を付けた時だけ反映する。 `repair-outbox`は登録待ちのqueuedジョブを最大10件確認し、`--apply`で再登録する。本物のCloud Tasksへの登録は本番設定（`TASKS_LOCATION`・`TASKS_QUEUE`・`TASKS_CALLER_SA`・`WORKER_URL`）が必要で、ローカルではdry-runのみ。
 
 ```sh
 # 起動中のAPIコンテナで、まず変更内容を確認する
-docker compose -f compose.dev.yaml -f compose.firestore.yaml exec -T api node dist/storage/firestore-cli.js initialize --project demo-akicourt-local --database '(default)'
+docker compose -f compose.dev.yaml exec -T api node dist/storage/firestore-cli.js initialize --project demo-akicourt-local --database '(default)'
 # 初期化を反映（更新受付は停止状態）
-docker compose -f compose.dev.yaml -f compose.firestore.yaml exec -T api node dist/storage/firestore-cli.js initialize --project demo-akicourt-local --database '(default)' --apply
+docker compose -f compose.dev.yaml exec -T api node dist/storage/firestore-cli.js initialize --project demo-akicourt-local --database '(default)' --apply
 # 公園・祝日を投入。--applyを外すとdry-run
-docker compose -f compose.dev.yaml -f compose.firestore.yaml exec -T api node dist/storage/firestore-cli.js seed-reference-data --project demo-akicourt-local --database '(default)' --apply
-docker compose -f compose.dev.yaml -f compose.firestore.yaml exec -T api node dist/storage/firestore-cli.js status --project demo-akicourt-local --database '(default)'
-docker compose -f compose.dev.yaml -f compose.firestore.yaml exec -T api npm run test:firestore
+docker compose -f compose.dev.yaml exec -T api node dist/storage/firestore-cli.js seed-reference-data --project demo-akicourt-local --database '(default)' --apply
+# 更新受付を開始
+docker compose -f compose.dev.yaml exec -T api node dist/storage/firestore-cli.js resume --project demo-akicourt-local --database '(default)' --apply
+docker compose -f compose.dev.yaml exec -T api node dist/storage/firestore-cli.js status --project demo-akicourt-local --database '(default)'
+docker compose -f compose.dev.yaml exec -T api npm run test:firestore
 # 停止
-docker compose -f compose.dev.yaml -f compose.firestore.yaml down
+docker compose -f compose.dev.yaml down
 ```
 
 参照データの投入は取得停止・所有者なしの状態で行う。初期化の再実行で停止理由やカウンターはリセットしない。不完全な初期状態では書き換えずエラーにする。テストは実行ごとの専用エミュレータDBを使い、既存のローカルデータを削除しない。
@@ -103,9 +108,9 @@ API全体の待機は30秒、Firestore処理の待機は10秒、画面は35秒�
 
 ## API／workerの起動
 
-`npm start`はビルド後に`dist/server.js`を起動する。ローカルの`npm run dev`も同じ入口を監視起動する。公開APIは`/api/availability/*`、workerは`/tasks/acquire`だけを登録し、公開APIへworkerルートを載せない。Viteは`/api`を除去せずAPIへ転送する。
+`npm start`はビルド後に`dist/server.js`を起動する。ローカルの`npm run dev`も同じ入口を監視起動する。公開APIは`/api/availability/*`、workerは`/tasks/acquire`だけを登録し、公開APIへworkerルートを載せない。起動処理でFirestore・配送・公式通信を組み立て、APIへサービス、workerへ取得処理を渡す。ルートや業務処理は環境変数で切り替えない。Viteは`/api`を除去せずAPIへ転送する。
 
-本番は`NODE_ENV=production`と`APP_ROLE=api`または`worker`を必須とし、`PORT`（既定8080）で0.0.0.0待受する。ローカルはapiが既定、PORT=17591・API_HOST=127.0.0.1で起動する（DockerはAPI_HOST=0.0.0.0）。本番workerはCloud Run IAMを必須とし、公開サービスとして配置しない。タスクヘッダーだけでは認証しない。ローカルworkerの保存応答/配送配線はFS-3cで追加するため、それまではworker起動を拒否し公式通信を始めない。
+本番は`NODE_ENV=production`と`APP_ROLE=api`または`worker`を必須とし、`PORT`（既定8080）で0.0.0.0待受する。ローカルはapiが既定、PORT=17591・API_HOST=127.0.0.1で起動する（DockerはAPI_HOST=0.0.0.0）。本番workerはCloud Run IAMを必須とし、公開サービスとして配置しない。タスクヘッダーだけでは認証しない。ローカルはdemoプロジェクトとFirestoreエミュレータを使用し、配送処理の接続先はCompose内のworkerを指定する。本番はFirestore・Cloud Tasks・IAMを使用する。workerのHTTPポートはCompose内だけに公開する。
 
 ## 本番用の配布設定
 
