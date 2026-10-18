@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import App from '../../App.vue'
 import { defaults, today, validate, type SearchResult } from '../../availability/model'
-import { payload, type Job } from '../../availability/api'
+import { payload, search, updates, type Job } from '../../availability/api'
 
 const result = (coverage: 'none' | 'complete' = 'none'): SearchResult => {
   const form = defaults()
@@ -297,4 +297,40 @@ describe('API search and asynchronous updates', () => {
     expect(malformed.text()).not.toContain('条件に合う枠はありません')
     malformed.unmount()
   })
+})
+
+it('accepts search and update responses for five targets spanning two weeks', async () => {
+  const input = {
+    ...defaults(),
+    targets: ['1280:grass', '1310:hard', '1000:grass', '1040:grass', '1350:hard'],
+    dateFrom: '2026-10-18',
+    dateTo: '2026-10-24',
+  }
+  const scopes = payload(input).targets.flatMap((target) =>
+    ['2026-10-12', '2026-10-19'].map((weekStart) => ({
+      ...result().scopes[0]!,
+      ...target,
+      weekStart,
+    })),
+  )
+  const jobs = scopes.map((scope, i) => ({
+    ...job('queued'),
+    parkId: scope.parkId,
+    surface: scope.surface,
+    weekStart: scope.weekStart,
+    jobId: `job-${i}`,
+    reused: false,
+  }))
+  vi.stubGlobal(
+    'fetch',
+    vi
+      .fn()
+      .mockResolvedValueOnce(
+        response({ ...result(), dateFrom: input.dateFrom, dateTo: input.dateTo, scopes }),
+      )
+      .mockResolvedValueOnce(response({ jobs, pollAfterSeconds: 3 })),
+  )
+  const signal = new AbortController().signal
+  expect((await search(input, signal)).scopes).toHaveLength(10)
+  expect((await updates(input, signal)).jobs).toHaveLength(10)
 })

@@ -77,7 +77,7 @@ describe('Valibot API contracts', () => {
       expect(v.safeParse(UpdatesSchema, { jobs: [job], pollAfterSeconds }).success).toBe(false)
     expect(v.safeParse(UpdatesSchema, { jobs: [], pollAfterSeconds: 3 }).success).toBe(false)
     expect(
-      v.safeParse(UpdatesSchema, { jobs: Array(5).fill(job), pollAfterSeconds: 3 }).success,
+      v.safeParse(UpdatesSchema, { jobs: Array(11).fill(job), pollAfterSeconds: 3 }).success,
     ).toBe(false)
   })
   it('rejects invalid slot times, dates and court counts', () => {
