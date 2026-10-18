@@ -1,9 +1,6 @@
 import * as v from 'valibot'
 import { DateString, parseValue } from '../validation'
 import { createHash } from 'node:crypto'
-import { Pool, PoolClient } from 'pg'
-import calendar from './holiday-calendar'
-import { transaction } from './database'
 
 export const HOLIDAY_SOURCE = 'https://www8.cao.go.jp/chosei/shukujitsu/syukujitsu.csv'
 type Holiday = { date: string; name: string }
@@ -81,36 +78,4 @@ export function validateCalendarData(
       return entry
     })
     .sort((a, b) => a.year - b.year)
-}
-
-export async function registerHolidays(
-  pool: Pool,
-  years: number[],
-  data: unknown = calendar,
-): Promise<void> {
-  // Validate every requested year before touching the DB. Publish all years
-  // atomically; interruption or insertion failure leaves existing data intact.
-  const selected = validateCalendar(data, years)
-  await transaction(pool, async (client) => {
-    await writeHolidays(client, selected)
-  })
-}
-
-export async function writeHolidays(client: PoolClient, selected: Year[]): Promise<void> {
-  await client.query('SELECT pg_advisory_xact_lock(1759104)')
-  for (const entry of selected) {
-    await client.query('DELETE FROM holidays WHERE extract(year FROM use_date)::integer=$1', [
-      entry.year,
-    ])
-    for (const holiday of entry.holidays)
-      await client.query(
-        'INSERT INTO holidays(use_date,name,source,updated_at) VALUES($1,$2,$3,clock_timestamp())',
-        [holiday.date, holiday.name, HOLIDAY_SOURCE],
-      )
-    await client.query(
-      `INSERT INTO holiday_calendar_years(year,source) VALUES($1,$2)
-      ON CONFLICT(year) DO UPDATE SET source=excluded.source,updated_at=clock_timestamp()`,
-      [entry.year, HOLIDAY_SOURCE],
-    )
-  }
 }

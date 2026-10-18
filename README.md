@@ -122,7 +122,7 @@ node apps/api/scripts/check-production-image.cjs
 
 ## CI・依存更新
 
-GitHub Actionsの`CI`はmain・developへのpushとすべてのPRで実行する。Node.jsは`.nvmrc`を参照し、Webのlint・型チェック・ビルド・単体テストと、APIの型チェック・ビルド・単体テスト・PostgreSQL 18での統合テストを検証する。FirestoreジョブではDockerエミュレータの起動・SDK疎通・初期投入/読取の統合テストも行う。Production imageジョブでは本番イメージをビルドし、外部通信なしでAPI/workerの起動確認を行う。lintは自動修正を行わない。CIの依存インストールには`npm ci --ignore-scripts`を使い、依存パッケージのライフサイクルスクリプトを実行しない。テストでは公式サイトへの実通信を行わない。
+GitHub Actionsの`CI`はmain・developへのpushとすべてのPRで実行する。Node.jsは`.nvmrc`を参照し、Webのlint・型チェック・ビルド・単体テストと、APIの型チェック・ビルド・単体テストを検証する。FirestoreジョブではDockerエミュレータの起動・SDK疎通・初期投入/読取の統合テストも行う。Production imageジョブでは本番イメージをビルドし、外部通信なしでAPI/workerの起動確認を行う。lintは自動修正を行わない。CIの依存インストールには`npm ci --ignore-scripts`を使い、依存パッケージのライフサイクルスクリプトを実行しない。テストでは公式サイトへの実通信を行わない。
 
 Dependabotは毎週月曜9:00（日本時間）にnpm・GitHub Actions・Dockerfile・Composeの依存更新を確認し、develop向けPRを作成する。通常の依存更新は公開から7日間のクールダウンを設け、新規リリース直後の不正なパッケージ混入リスクを抑える。クールダウンはセキュリティ更新には適用されない。npmとDocker関連のminor・patch更新をまとめ、major更新は個別にレビューする。Dependabotを有効にするには`.github/dependabot.yml`をリポジトリのデフォルトブランチにも反映する。
 
@@ -134,7 +134,7 @@ curl -sS http://127.0.0.1:17590/api/availability/search -H 'Content-Type: applic
 
 日付省略時は日本時間の本日から7日間。検索は保存済み情報のみを返す。`POST /api/availability/updates`へ同じ対象・期間を送り、返された`jobId`を`GET /api/availability/updates/:jobId`で確認する。更新にはCloud Tasksの本番設定とDBの更新許可が必要（停止中は503）。workerがscale-to-zeroでも受付可能。祝日条件に必要な年の登録が未完了なら503を返す。[祝日データの登録・更新手順](docs/祝日データ.md)を参照（2026・2027年を同梱）。
 
-公式への取得は更新APIで登録し、タスク配送先のworkerで実行する。同じ対象週の再送は既存ジョブを再利用し、登録待ちの場合だけタスク登録を再試行する。公開APIは公式へ直接通信しない。旧PostgreSQLのコード・CLI・Compose・CIは段階的な除去待ちで、公開APIからは使用しない。
+公式への取得は更新APIで登録し、タスク配送先のworkerで実行する。同じ対象週の再送は既存ジョブを再利用し、登録待ちの場合だけタスク登録を再試行する。公開APIは公式へ直接通信しない。保存先はFirestoreのみを使用する。
 
 期間以外の検索条件は変更時にブラウザ内へ自動保存する。画面を開くと期間は常に日本時間の本日から7日間（終了日は6日後）になる。公園は名前検索付きの選択画面で最大5対象を指定する。時間帯は開始時刻を複数選択でき、選択なしは時間指定なし。開始時刻の絞り込みは、検索APIが返す検証済みの保存枠に対して画面側で行う（取得範囲は変更しない）。終了時刻は公園・季節により異なるため、取得値をそのまま表示する。公式サイトへは画面上部の共通リンクから別タブで移動する。検索条件の引き継ぎや枠のコピーは行わず、予約操作は公式側で行う。
 
