@@ -34,7 +34,7 @@
     "cheerio": "1.2.0",
     "fastify": "^5.0.0",
     "fastify-cli": "^8.0.3",
-    "fastify-plugin": "^6.0.0",
+    "fastify-plugin": "^6.0.1",
     "tough-cookie": "6.0.2",
     "valibot": "1.5.0"
   },
@@ -44,11 +44,11 @@
     "concurrently": "^10.0.1",
     "eslint": "^10.10.0",
     "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-oxlint": "~1.82.0",
+    "eslint-plugin-oxlint": "~1.87.0",
     "fastify-tsconfig": "^3.0.0",
     "firebase-tools": "15.34.0",
-    "oxlint": "~1.82.0",
-    "prettier": "3.9.6",
+    "oxlint": "~1.87.0",
+    "prettier": "3.9.10",
     "ts-node": "^10.4.0",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.71.1"
